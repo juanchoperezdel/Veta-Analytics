@@ -34,7 +34,7 @@ export default async (req: Request, context: Context) => {
       AND snapshot_date BETWEEN ${start ?? sql`CURRENT_DATE - 29`} AND ${end ?? sql`CURRENT_DATE`}
   `;
 
-  // Período anterior (mismo largo)
+  // Período anterior: mismo rango un mes atrás
   const [prev] = await sql`
     SELECT
       SUM(users)::bigint           AS users,
@@ -47,8 +47,8 @@ export default async (req: Request, context: Context) => {
     FROM business_kpis
     WHERE client_id = ${client.id}
       AND snapshot_date BETWEEN
-        (${start ?? sql`CURRENT_DATE - 29`}::date - (${end ?? sql`CURRENT_DATE`}::date - ${start ?? sql`CURRENT_DATE - 29`}::date + 1))
-        AND (${start ?? sql`CURRENT_DATE - 29`}::date - 1)
+        (${start ?? sql`CURRENT_DATE - 29`}::date - INTERVAL '1 month')
+        AND (${end ?? sql`CURRENT_DATE`}::date - INTERVAL '1 month')
   `;
 
   function delta(c: number, p: number) {

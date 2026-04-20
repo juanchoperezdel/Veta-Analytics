@@ -34,14 +34,14 @@ export default async (req: Request, context: Context) => {
     ORDER BY SUM(revenue) DESC
   `;
 
-  // Delta vs período anterior
+  // Delta vs mismo período del mes anterior
   const prevRows = await sql`
     SELECT route, SUM(revenue)::numeric AS revenue, SUM(articles)::bigint AS articles, SUM(purchases)::bigint AS purchases
     FROM product_routes
     WHERE client_id = ${client.id}
       AND snapshot_date BETWEEN
-        (${startDate}::date - (${endDate}::date - ${startDate}::date + 1))
-        AND (${startDate}::date - 1)
+        (${startDate}::date - INTERVAL '1 month')
+        AND (${endDate}::date - INTERVAL '1 month')
     GROUP BY route
   `;
   const prevMap = Object.fromEntries(prevRows.map((r: any) => [r.route, r]));

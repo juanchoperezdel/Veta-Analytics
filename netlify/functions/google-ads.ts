@@ -37,8 +37,8 @@ export default async (req: Request, context: Context) => {
     FROM google_ads_campaigns
     WHERE client_id = ${client.id}
       AND snapshot_date BETWEEN
-        (${startDate}::date - (${endDate}::date - ${startDate}::date + 1))
-        AND (${startDate}::date - 1)
+        (${startDate}::date - INTERVAL '1 month')
+        AND (${endDate}::date - INTERVAL '1 month')
   `;
 
   function delta(c: number, p: number) { return (!p || p === 0) ? 0 : (c - p) / p; }

@@ -4,19 +4,32 @@ import { cn } from '@/lib/utils';
 
 export type DateRange = { start: string; end: string; label: string };
 
-const PRESETS: DateRange[] = [
-  { label: 'Últimos 7 días',  start: daysAgo(6),  end: today() },
-  { label: 'Últimos 30 días', start: daysAgo(29), end: today() },
-  { label: 'Últimos 90 días', start: daysAgo(89), end: today() },
-];
-
-export function defaultRange(): DateRange { return PRESETS[1]; }
-
 function today() { return new Date().toISOString().split('T')[0]; }
 function daysAgo(n: number) {
   const d = new Date(); d.setDate(d.getDate() - n);
   return d.toISOString().split('T')[0];
 }
+function startOfMonth() {
+  const d = new Date(); d.setDate(1);
+  return d.toISOString().split('T')[0];
+}
+function startOfLastMonth() {
+  const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+  return d.toISOString().split('T')[0];
+}
+function endOfLastMonth() {
+  const d = new Date(); d.setDate(0);
+  return d.toISOString().split('T')[0];
+}
+
+const PRESETS: DateRange[] = [
+  { label: 'Este mes hasta la fecha', start: startOfMonth(),     end: today() },
+  { label: 'Mes pasado',              start: startOfLastMonth(), end: endOfLastMonth() },
+  { label: 'Últimos 7 días',          start: daysAgo(6),         end: today() },
+  { label: 'Últimos 30 días',         start: daysAgo(29),        end: today() },
+];
+
+export function defaultRange(): DateRange { return PRESETS[0]; }
 
 export function DateRangePicker({ value, onChange }: { value: DateRange; onChange: (r: DateRange) => void }) {
   const [open, setOpen] = useState(false);
