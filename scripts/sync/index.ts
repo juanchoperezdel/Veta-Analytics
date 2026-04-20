@@ -112,6 +112,7 @@ async function syncGoogleAds(clientId: string, customerId: string) {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'developer-token': process.env.GOOGLE_ADS_DEV_TOKEN!,
+        'login-customer-id': process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID!,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ query }),
@@ -172,30 +173,22 @@ async function syncGoogleAds(clientId: string, customerId: string) {
 // ─── GA4 (KPIs + rutas) ──────────────────────────────────────────────────────
 
 async function syncGA4(clientId: string, propertyId: string) {
-  const serviceAccount = JSON.parse(process.env.GA4_SERVICE_ACCOUNT_JSON!);
+  // Usa authorized_user credential (refresh_token)
+  const cred = JSON.parse(process.env.GA4_SERVICE_ACCOUNT_JSON!);
 
-  // Obtener token con JWT (service account)
-  const jwtHeader = btoa(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const now = Math.floor(Date.now() / 1000);
-  const jwtPayload = btoa(JSON.stringify({
-    iss: serviceAccount.client_email,
-    scope: 'https://www.googleapis.com/auth/analytics.readonly',
-    aud: 'https://oauth2.googleapis.com/token',
-    exp: now + 3600,
-    iat: now,
-  }));
-
-  // Para firmar el JWT necesitamos la librería googleapis o similar
-  // Usamos el endpoint de token con service account credentials via fetch directo
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-      assertion: await signJwt(serviceAccount, now),
+      client_id:     cred.client_id,
+      client_secret: cred.client_secret,
+      refresh_token: cred.refresh_token,
+      grant_type:    'refresh_token',
     }),
   });
-  const { access_token } = await tokenRes.json();
+  const tokenData = await tokenRes.json();
+  if (!tokenData.access_token) throw new Error(`GA4 token error: ${JSON.stringify(tokenData)}`);
+  const access_token = tokenData.access_token;
 
   // Reporte de KPIs de negocio
   const kpisRes = await fetch(
@@ -285,43 +278,6 @@ async function syncGA4(clientId: string, propertyId: string) {
   }
 
   console.log(`✓ GA4 synced: KPIs + ${routesData.rows?.length ?? 0} routes`);
-}
-
-// ─── JWT helper para service account ────────────────────────────────────────
-
-async function signJwt(serviceAccount: any, now: number): Promise<string> {
-  const header = base64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
-  const payload = base64url(JSON.stringify({
-    iss: serviceAccount.client_email,
-    scope: 'https://www.googleapis.com/auth/analytics.readonly',
-    aud: 'https://oauth2.googleapis.com/token',
-    exp: now + 3600,
-    iat: now,
-  }));
-  const signingInput = `${header}.${payload}`;
-
-  const privateKey = await crypto.subtle.importKey(
-    'pkcs8',
-    pemToArrayBuffer(serviceAccount.private_key),
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', privateKey, new TextEncoder().encode(signingInput));
-  return `${signingInput}.${base64url(Buffer.from(signature).toString('binary'))}`;
-}
-
-function base64url(str: string): string {
-  return Buffer.from(str).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-function pemToArrayBuffer(pem: string): ArrayBuffer {
-  const b64 = pem.replace(/-----[^-]+-----/g, '').replace(/\s/g, '');
-  const binary = atob(b64);
-  const buffer = new ArrayBuffer(binary.length);
-  const view = new Uint8Array(buffer);
-  for (let i = 0; i < binary.length; i++) view[i] = binary.charCodeAt(i);
-  return buffer;
 }
 
 function secondsToMMSS(seconds: number): string {
