@@ -170,6 +170,79 @@ async function syncGoogleAds(clientId: string, customerId: string) {
   console.log(`✓ Google Ads synced: ${results.length} campaigns`);
 }
 
+// ─── YouTube Ads (via Google Ads API) ────────────────────────────────────────
+
+async function syncYouTube(clientId: string, customerId: string) {
+  const accessToken = await getGoogleAccessToken();
+
+  const query = `
+    SELECT
+      ad_group_ad.ad.video_ad.video.id,
+      ad_group_ad.ad.name,
+      campaign.name,
+      metrics.cost_micros,
+      metrics.impressions,
+      metrics.clicks,
+      metrics.ctr,
+      metrics.video_views,
+      metrics.all_conversions,
+      metrics.all_conversions_value
+    FROM ad_group_ad
+    WHERE segments.date DURING LAST_30_DAYS
+      AND campaign.advertising_channel_type = 'VIDEO'
+      AND metrics.cost_micros > 0
+    ORDER BY metrics.cost_micros DESC
+    LIMIT 20
+  `;
+
+  const res = await fetch(
+    `https://googleads.googleapis.com/v18/customers/${customerId}/googleAds:search`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'developer-token': process.env.GOOGLE_ADS_DEV_TOKEN!,
+        'login-customer-id': process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID!,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    }
+  );
+
+  if (!res.ok) throw new Error(`YouTube API error: ${res.status} ${await res.text()}`);
+  const { results = [] }: { results: any[] } = await res.json();
+
+  for (const row of results) {
+    const videoId   = row.adGroupAd?.ad?.videoAd?.video?.id ?? row.adGroupAd?.ad?.name ?? 'unknown';
+    const title     = row.adGroupAd?.ad?.name ?? 'Sin título';
+    const campaign  = row.campaign?.name ?? '';
+    const spend     = (row.metrics?.costMicros ?? 0) / 1_000_000;
+    const impressions  = Number(row.metrics?.impressions ?? 0);
+    const clicks       = Number(row.metrics?.clicks ?? 0);
+    const ctr          = parseFloat(row.metrics?.ctr ?? '0');
+    const conversions  = parseFloat(row.metrics?.allConversions ?? '0');
+    const convValue    = parseFloat(row.metrics?.allConversionsValue ?? '0');
+    const convRate     = impressions > 0 ? conversions / impressions : 0;
+
+    await sql`
+      INSERT INTO youtube_videos
+        (client_id, snapshot_date, video_id, title, campaign, impressions, clicks, ctr, conversions, conversion_rate, spend)
+      VALUES
+        (${clientId}, ${TODAY}, ${videoId}, ${title}, ${campaign},
+         ${impressions}, ${clicks}, ${ctr}, ${conversions}, ${convRate}, ${spend})
+      ON CONFLICT (client_id, snapshot_date, video_id)
+      DO UPDATE SET
+        title = EXCLUDED.title, campaign = EXCLUDED.campaign,
+        impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
+        ctr = EXCLUDED.ctr, conversions = EXCLUDED.conversions,
+        conversion_rate = EXCLUDED.conversion_rate, spend = EXCLUDED.spend,
+        synced_at = NOW()
+    `;
+  }
+
+  console.log(`✓ YouTube synced: ${results.length} videos`);
+}
+
 // ─── GA4 (KPIs + rutas) ──────────────────────────────────────────────────────
 
 async function syncGA4(clientId: string, propertyId: string) {
@@ -316,6 +389,12 @@ async function main() {
       await syncGA4(client.id, process.env.GA4_PROPERTY_ID!);
     } catch (e) {
       console.error(`  ✗ GA4 error:`, e);
+    }
+
+    try {
+      await syncYouTube(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
+    } catch (e) {
+      console.error(`  ✗ YouTube error:`, e);
     }
   }
 
