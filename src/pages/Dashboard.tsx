@@ -43,9 +43,9 @@ export default function Dashboard() {
   const purchaseRate = users > 0 ? (purchases / users) * 100 : 0;
 
   const channelData = [
-    { name: 'Google Ads', value: channels?.google ?? 0, color: '#3b82f6' },
-    { name: 'Meta Ads',   value: channels?.meta   ?? 0, color: '#8b5cf6' },
-    { name: 'Otros',      value: channels?.other  ?? 0, color: '#10b981' },
+    { name: 'Google Ads',       value: channels?.google ?? 0, color: '#3b82f6' },
+    { name: 'Meta Ads',         value: channels?.meta   ?? 0, color: '#8b5cf6' },
+    { name: 'Directo/Orgánico', value: channels?.other  ?? 0, color: '#10b981' },
   ];
   const hasChannelData = channelData.some(c => c.value > 0);
 
