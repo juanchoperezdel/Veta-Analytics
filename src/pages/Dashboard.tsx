@@ -1,43 +1,51 @@
 import { useParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { Clock, ArrowUpRight, ArrowDownRight, MoreHorizontal } from 'lucide-react';
 import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { clients, mockData } from '@/data/mockData';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { api, getClients } from '@/lib/api';
+import type { BusinessKPIs, ProductRoute } from '@/data/types';
 
 export default function Dashboard() {
   const { clientSlug } = useParams();
-  const data = mockData[clientSlug as keyof typeof mockData] || mockData['andesmar'];
-  const currentClient = clients.find(c => c.slug === clientSlug) || clients[0];
+  const [kpis, setKpis] = useState<BusinessKPIs | null>(null);
+  const [topRoutes, setTopRoutes] = useState<ProductRoute[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  if (!data) return <div className="p-8 text-slate-500">No hay datos disponibles</div>;
+  const allClients = getClients();
+  const currentClient = allClients.find(c => c.slug === clientSlug) ?? { name: clientSlug ?? '' };
 
-  const kpis = data.businessKpis;
+  useEffect(() => {
+    if (!clientSlug) return;
+    setLoading(true);
+    Promise.all([
+      api.dashboard(clientSlug),
+      api.products(clientSlug),
+    ]).then(([dashData, prodData]) => {
+      setKpis(dashData.businessKpis);
+      setTopRoutes((prodData.routes ?? []).slice(0, 3));
+    }).finally(() => setLoading(false));
+  }, [clientSlug]);
 
-  // Mock mini sparkline data 
+  if (loading) return <div className="p-8 text-slate-400 animate-pulse">Cargando datos...</div>;
+  if (!kpis) return <div className="p-8 text-slate-500">No hay datos disponibles</div>;
+
   const spark1 = [2,4,3,5,4,6,5,7,6,8,7];
   const spark2 = [8,7,8,6,7,5,6,3,6,8,9];
   const spark3 = [1,2,2,3,4,3,5,6,8,7,9];
 
-  // New Dashboard Additions
   const users = kpis.users.value;
   const carts = kpis.carts.value;
-  const purchases = kpis.purchases?.value || kpis.tickets.value;
-  const cartRate = (carts / users) * 100;
-  const purchaseRate = (purchases / users) * 100;
+  const purchases = kpis.tickets.value;
+  const cartRate = users > 0 ? (carts / users) * 100 : 0;
+  const purchaseRate = users > 0 ? (purchases / users) * 100 : 0;
 
   const channelData = [
     { name: 'Google Ads', value: kpis.revenue.value * 0.45, color: '#3b82f6' },
     { name: 'Meta Ads', value: kpis.revenue.value * 0.30, color: '#8b5cf6' },
     { name: 'Orgánico', value: kpis.revenue.value * 0.15, color: '#10b981' },
     { name: 'Directo', value: kpis.revenue.value * 0.10, color: '#f59e0b' }
-  ];
-
-  // @ts-ignore
-  const topRoutes = data.products?.routes?.slice(0, 3) || [
-    { route: 'Mendoza - Retiro', revenue: 1545000, purchases: 450 },
-    { route: 'Córdoba - Rosario', revenue: 852000, purchases: 210 },
-    { route: 'Salta - Tucumán', revenue: 420000, purchases: 130 }
   ];
 
   return (
@@ -81,12 +89,12 @@ export default function Dashboard() {
             sparklineData={spark1} 
             color="#8b5cf6" 
           />
-          <HeroKpiCard 
-            title="Compras Totales" 
-            value={formatNumber(kpis.purchases?.value || kpis.tickets.value)} 
-            delta={kpis.purchases?.delta || kpis.tickets.delta} 
-            sparklineData={spark2} 
-            color="#f59e0b" 
+          <HeroKpiCard
+            title="Compras Totales"
+            value={formatNumber(kpis.tickets.value)}
+            delta={kpis.tickets.delta}
+            sparklineData={spark2}
+            color="#f59e0b"
           />
           <HeroKpiCard 
             title="Ticket Promedio" 
