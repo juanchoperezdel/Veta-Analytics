@@ -101,7 +101,7 @@ async function syncGoogleAds(clientId: string, customerId: string) {
       metrics.conversions, metrics.conversions_value
     FROM campaign
     WHERE segments.date DURING LAST_30_DAYS
-      AND campaign.status = 'ENABLED'
+      AND metrics.cost_micros > 0
     ORDER BY metrics.cost_micros DESC
   `;
 
