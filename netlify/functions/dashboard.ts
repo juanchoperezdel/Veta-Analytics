@@ -26,8 +26,8 @@ export default async (req: Request, context: Context) => {
       SUM(revenue)::numeric        AS revenue,
       SUM(carts)::bigint           AS carts,
       SUM(tickets)::bigint         AS tickets,
-      AVG(conversion_rate)::numeric AS conversion_rate,
-      AVG(aov)::numeric             AS aov,
+      SUM(tickets)::numeric  / NULLIF(SUM(users)::numeric, 0)   AS conversion_rate,
+      SUM(revenue)::numeric  / NULLIF(SUM(tickets)::numeric, 0) AS aov,
       MAX(avg_session_duration)     AS avg_session_duration
     FROM business_kpis
     WHERE client_id = ${client.id}
@@ -42,8 +42,8 @@ export default async (req: Request, context: Context) => {
       SUM(revenue)::numeric        AS revenue,
       SUM(carts)::bigint           AS carts,
       SUM(tickets)::bigint         AS tickets,
-      AVG(conversion_rate)::numeric AS conversion_rate,
-      AVG(aov)::numeric             AS aov
+      SUM(tickets)::numeric  / NULLIF(SUM(users)::numeric, 0)   AS conversion_rate,
+      SUM(revenue)::numeric  / NULLIF(SUM(tickets)::numeric, 0) AS aov
     FROM business_kpis
     WHERE client_id = ${client.id}
       AND snapshot_date BETWEEN
@@ -67,5 +67,30 @@ export default async (req: Request, context: Context) => {
     aov:                { value: Number(curr.aov ?? 0),              delta: delta(curr.aov, prev?.aov) },
   } : null;
 
-  return new Response(JSON.stringify({ businessKpis }), { headers: corsHeaders() });
+  // Ingresos por canal: revenue real de cada plataforma, resto = "Otros"
+  const [googleRow] = await sql`
+    SELECT COALESCE(SUM(revenue), 0)::numeric AS revenue
+    FROM google_ads_campaigns
+    WHERE client_id = ${client.id}
+      AND snapshot_date BETWEEN ${start ?? sql`CURRENT_DATE - 29`} AND ${end ?? sql`CURRENT_DATE`}
+  `;
+  const [metaRow] = await sql`
+    SELECT COALESCE(SUM(revenue), 0)::numeric AS revenue
+    FROM meta_ads_campaigns
+    WHERE client_id = ${client.id}
+      AND snapshot_date BETWEEN ${start ?? sql`CURRENT_DATE - 29`} AND ${end ?? sql`CURRENT_DATE`}
+  `;
+
+  const googleRevenue = Number(googleRow?.revenue ?? 0);
+  const metaRevenue   = Number(metaRow?.revenue ?? 0);
+  const totalRevenue  = Number(curr?.revenue ?? 0);
+  const otherRevenue  = Math.max(0, totalRevenue - googleRevenue - metaRevenue);
+
+  const channelRevenue = {
+    google: googleRevenue,
+    meta:   metaRevenue,
+    other:  otherRevenue,
+  };
+
+  return new Response(JSON.stringify({ businessKpis, channelRevenue }), { headers: corsHeaders() });
 };

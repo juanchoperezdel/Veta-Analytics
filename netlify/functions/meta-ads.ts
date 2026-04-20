@@ -45,13 +45,20 @@ export default async (req: Request, context: Context) => {
   const cpa       = purchases > 0 ? spend / purchases : 0;
   const aov       = purchases > 0 ? revenue / purchases : 0;
 
+  const prevSpend     = Number(prev?.spend ?? 0);
+  const prevPurchases = Number(prev?.purchases ?? 0);
+  const prevRevenue   = Number(prev?.revenue ?? 0);
+  const prevRoas      = prevSpend > 0 ? prevRevenue / prevSpend : 0;
+  const prevCpa       = prevPurchases > 0 ? prevSpend / prevPurchases : 0;
+  const prevAov       = prevPurchases > 0 ? prevRevenue / prevPurchases : 0;
+
   const kpis = {
-    spend:     { value: spend,     delta: delta(spend,     Number(prev?.spend ?? 0)) },
-    purchases: { value: purchases, delta: delta(purchases, Number(prev?.purchases ?? 0)) },
-    revenue:   { value: revenue,   delta: delta(revenue,   Number(prev?.revenue ?? 0)) },
-    cpa:       { value: cpa,       delta: 0 },
-    roas:      { value: roas,      delta: 0 },
-    aov:       { value: aov,       delta: 0 },
+    spend:     { value: spend,     delta: delta(spend,     prevSpend) },
+    purchases: { value: purchases, delta: delta(purchases, prevPurchases) },
+    revenue:   { value: revenue,   delta: delta(revenue,   prevRevenue) },
+    cpa:       { value: cpa,       delta: delta(cpa,       prevCpa) },
+    roas:      { value: roas,      delta: delta(roas,      prevRoas) },
+    aov:       { value: aov,       delta: delta(aov,       prevAov) },
   };
 
   const rows = await sql`

@@ -53,4 +53,5 @@ export const api = {
   metaAds:   (slug: string, start?: string, end?: string) => apiFetch(`/meta-ads?slug=${slug}${rangeParams(start, end)}`),
   products:  (slug: string, start?: string, end?: string) => apiFetch(`/products?slug=${slug}${rangeParams(start, end)}`),
   youtube:   (slug: string, start?: string, end?: string) => apiFetch(`/youtube?slug=${slug}${rangeParams(start, end)}`),
+  evolutivo: (slug: string) => apiFetch(`/evolutivo?slug=${slug}`),
 };

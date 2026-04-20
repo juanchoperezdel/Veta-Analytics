@@ -1,17 +1,18 @@
 import { useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { Clock, ArrowUpRight, ArrowDownRight, MoreHorizontal } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, MoreHorizontal } from 'lucide-react';
 import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { Card, CardContent } from '@/components/ui/Card';
+import { Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { api, getClients } from '@/lib/api';
 import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
 import type { DateRange } from '@/components/ui/DateRangePicker';
-import type { BusinessKPIs, ProductRoute } from '@/data/types';
+import type { BusinessKPIs, ChannelRevenue, ProductRoute } from '@/data/types';
 
 export default function Dashboard() {
   const { clientSlug } = useParams();
   const [kpis, setKpis] = useState<BusinessKPIs | null>(null);
+  const [channels, setChannels] = useState<ChannelRevenue | null>(null);
   const [topRoutes, setTopRoutes] = useState<ProductRoute[]>([]);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<DateRange>(defaultRange());
@@ -27,16 +28,13 @@ export default function Dashboard() {
       api.products(clientSlug, range.start, range.end),
     ]).then(([dashData, prodData]) => {
       setKpis(dashData.businessKpis);
+      setChannels(dashData.channelRevenue ?? null);
       setTopRoutes((prodData.routes ?? []).slice(0, 3));
     }).finally(() => setLoading(false));
   }, [clientSlug, range]);
 
   if (loading) return <div className="p-8 text-slate-400 animate-pulse">Cargando datos...</div>;
   if (!kpis) return <div className="p-8 text-slate-500">No hay datos disponibles</div>;
-
-  const spark1 = [2,4,3,5,4,6,5,7,6,8,7];
-  const spark2 = [8,7,8,6,7,5,6,3,6,8,9];
-  const spark3 = [1,2,2,3,4,3,5,6,8,7,9];
 
   const users = kpis.users.value;
   const carts = kpis.carts.value;
@@ -45,11 +43,11 @@ export default function Dashboard() {
   const purchaseRate = users > 0 ? (purchases / users) * 100 : 0;
 
   const channelData = [
-    { name: 'Google Ads', value: kpis.revenue.value * 0.45, color: '#3b82f6' },
-    { name: 'Meta Ads', value: kpis.revenue.value * 0.30, color: '#8b5cf6' },
-    { name: 'Orgánico', value: kpis.revenue.value * 0.15, color: '#10b981' },
-    { name: 'Directo', value: kpis.revenue.value * 0.10, color: '#f59e0b' }
+    { name: 'Google Ads', value: channels?.google ?? 0, color: '#3b82f6' },
+    { name: 'Meta Ads',   value: channels?.meta   ?? 0, color: '#8b5cf6' },
+    { name: 'Otros',      value: channels?.other  ?? 0, color: '#10b981' },
   ];
+  const hasChannelData = channelData.some(c => c.value > 0);
 
   return (
     <div className="py-12 max-w-7xl mx-auto space-y-12 relative z-10">
@@ -76,26 +74,20 @@ export default function Dashboard() {
 
         {/* Primary 3 Cards Hero (Reference specific) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <HeroKpiCard 
-            title="Sesiones Totales" 
-            value={formatNumber(kpis.sessions.value)} 
-            delta={kpis.sessions.delta} 
-            sparklineData={spark1} 
-            color="#8b5cf6" 
+          <HeroKpiCard
+            title="Sesiones Totales"
+            value={formatNumber(kpis.sessions.value)}
+            delta={kpis.sessions.delta}
           />
           <HeroKpiCard
             title="Compras Totales"
             value={formatNumber(kpis.tickets.value)}
             delta={kpis.tickets.delta}
-            sparklineData={spark2}
-            color="#f59e0b"
           />
-          <HeroKpiCard 
-            title="Ticket Promedio" 
-            value={formatCurrency(kpis.aov.value)} 
-            delta={kpis.aov.delta} 
-            sparklineData={spark3} 
-            color="#8b5cf6" 
+          <HeroKpiCard
+            title="Ticket Promedio"
+            value={formatCurrency(kpis.aov.value)}
+            delta={kpis.aov.delta}
           />
         </div>
       </div>
@@ -125,40 +117,48 @@ export default function Dashboard() {
         <Card className="hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)] transition-shadow duration-300">
           <CardContent className="p-6">
             <h3 className="text-[15px] font-bold text-slate-900 tracking-tight mb-1">Ingresos por Canal</h3>
-            <p className="text-xs text-slate-500 mb-6 font-medium">Distribución estimada del ROAS blended</p>
-            <div className="h-[180px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={channelData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={2}
-                    dataKey="value"
-                    stroke="none"
-                  >
-                    {channelData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    formatter={(value: number) => formatCurrency(value)}
-                    contentStyle={{ borderRadius: '12px', border: '1px solid #f1f5f9', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)' }}
-                    itemStyle={{ color: '#0f172a', fontWeight: '600' }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              {channelData.map((item, i) => (
-                <div key={i} className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="text-xs font-semibold text-slate-600">{item.name}</span>
+            <p className="text-xs text-slate-500 mb-6 font-medium">Revenue real por plataforma en el período</p>
+            {hasChannelData ? (
+              <>
+                <div className="h-[180px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={channelData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={2}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        {channelData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: number) => formatCurrency(value)}
+                        contentStyle={{ borderRadius: '12px', border: '1px solid #f1f5f9', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)' }}
+                        itemStyle={{ color: '#0f172a', fontWeight: '600' }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-              ))}
-            </div>
+                <div className="grid grid-cols-2 gap-3 mt-4">
+                  {channelData.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="text-xs font-semibold text-slate-600">{item.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="h-[180px] flex items-center justify-center text-sm text-slate-400">
+                Sin datos de revenue por canal
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -237,13 +237,9 @@ export default function Dashboard() {
   );
 }
 
-// Hero card matching the reference design layout
-function HeroKpiCard({ title, value, delta, sparklineData, color }: { title: string; value: string; delta: number; sparklineData: number[]; color: string }) {
+function HeroKpiCard({ title, value, delta }: { title: string; value: string; delta: number }) {
   const isPositive = delta > 0;
-  
-  // Create array of objects for recharts
-  const chartData = sparklineData.map((val, i) => ({ val, index: i }));
-  
+
   return (
     <Card className="hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.12)] transition-shadow duration-300 pointer-events-auto">
       <CardContent className="p-6">
@@ -251,42 +247,19 @@ function HeroKpiCard({ title, value, delta, sparklineData, color }: { title: str
           <h3 className="text-[15px] font-medium text-slate-700">{title}</h3>
           <button className="text-slate-400 hover:text-slate-800"><MoreHorizontal size={18}/></button>
         </div>
-        
-        <div className="flex items-end justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <h4 className="text-3xl font-bold text-slate-900 tracking-tight font-sans">{value}</h4>
-              <span className={cn(
-                "px-2 py-0.5 rounded-md text-xs font-bold flex items-center gap-0.5",
-                isPositive ? "bg-green-100 text-[#009960]" : "bg-orange-100 text-orange-600"
-              )}>
-                {isPositive ? <ArrowUpRight size={12} strokeWidth={3} /> : <ArrowDownRight size={12} strokeWidth={3} />}
-                {Math.abs(delta * 100).toFixed(0)}%
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 font-medium mt-1">vs. la semana pasada</p>
+
+        <div>
+          <div className="flex items-center gap-3">
+            <h4 className="text-3xl font-bold text-slate-900 tracking-tight font-sans">{value}</h4>
+            <span className={cn(
+              "px-2 py-0.5 rounded-md text-xs font-bold flex items-center gap-0.5",
+              isPositive ? "bg-green-100 text-[#009960]" : "bg-orange-100 text-orange-600"
+            )}>
+              {isPositive ? <ArrowUpRight size={12} strokeWidth={3} /> : <ArrowDownRight size={12} strokeWidth={3} />}
+              {Math.abs(delta * 100).toFixed(0)}%
+            </span>
           </div>
-          
-          <div className="w-[100px] h-[40px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                   <linearGradient id={`color-${color}`} x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={color} stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor={color} stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <Area 
-                  type="monotone" 
-                  dataKey="val" 
-                  stroke={color} 
-                  strokeWidth={2}
-                  fill={`url(#color-${color})`} 
-                  isAnimationActive={false}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <p className="text-xs text-slate-500 font-medium mt-1">vs. mismo período mes anterior</p>
         </div>
       </CardContent>
     </Card>

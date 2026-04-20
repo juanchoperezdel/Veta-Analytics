@@ -6,6 +6,7 @@ import GoogleAds from './pages/GoogleAds';
 import MetaAds from './pages/MetaAds';
 import Products from './pages/Products';
 import YouTube from './pages/YouTube';
+import Evolutivo from './pages/Evolutivo';
 import Login from './pages/Login';
 import { getToken } from './lib/api';
 
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="meta-ads"   element={<MetaAds />} />
           <Route path="products"   element={<Products />} />
           <Route path="youtube"    element={<YouTube />} />
+          <Route path="evolutivo"  element={<Evolutivo />} />
         </Route>
       </Routes>
     </Router>

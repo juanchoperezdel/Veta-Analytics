@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { Outlet, NavLink, useParams, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
+import {
+  LayoutDashboard,
   Map,
-  Youtube, 
-  PanelLeftClose, 
+  Youtube,
+  PanelLeftClose,
   PanelLeftOpen,
   ChevronDown,
   MonitorPlay,
   TrendingUp,
-  LineChart
+  LineChart,
+  BarChart3
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { clients } from '@/data/mockData';
@@ -26,6 +27,7 @@ export default function AppLayout() {
     { icon: LayoutDashboard, label: 'Dashboard', path: 'dashboard' },
     { icon: TrendingUp, label: 'Google Ads', path: 'google-ads' },
     { icon: LineChart, label: 'Meta Ads', path: 'meta-ads' },
+    { icon: BarChart3, label: 'Evolutivo', path: 'evolutivo' },
     { icon: Map, label: 'Rutas / Prod.', path: 'products' },
     { icon: MonitorPlay, label: 'YouTube', path: 'youtube' },
   ];

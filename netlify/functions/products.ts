@@ -46,7 +46,7 @@ export default async (req: Request, context: Context) => {
   `;
   const prevMap = Object.fromEntries(prevRows.map((r: any) => [r.route, r]));
 
-  function delta(c: number, p: number) { return (!p || p === 0) ? 0 : ((c - p) / p) * 100; }
+  function delta(c: number, p: number) { return (!p || p === 0) ? 0 : (c - p) / p; }
 
   const routes = rows.map((r: any, i: number) => {
     const p = prevMap[r.route];

@@ -43,13 +43,12 @@ export default function GoogleAds() {
         <DateRangePicker value={range} onChange={setRange} />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
         <SmallKpiCard title="Inversión"  value={formatCurrency(kpis.spend.value)}        delta={kpis.spend.delta}           inverseDelta />
         <SmallKpiCard title="Ingresos"   value={formatCurrency(kpis.revenue.value)}       delta={kpis.revenue.delta} />
         <SmallKpiCard title="ROAS"       value={`${kpis.roas.value.toFixed(2)}x`}         delta={kpis.roas.delta} />
         <SmallKpiCard title="CPA"        value={formatCurrency(kpis.cpa?.value ?? 0)}     delta={kpis.cpa?.delta ?? 0}       inverseDelta />
         <SmallKpiCard title="Carritos"   value={formatNumber(kpis.carts?.value ?? 0)}     delta={kpis.carts?.delta ?? 0} />
-        <SmallKpiCard title="Boletos"    value={formatNumber(kpis.tickets?.value ?? 0)}   delta={kpis.tickets?.delta ?? 0} />
         <SmallKpiCard title="AOV"        value={formatCurrency(kpis.aov?.value ?? 0)}     delta={kpis.aov?.delta ?? 0} />
       </div>
 

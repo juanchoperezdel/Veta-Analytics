@@ -50,14 +50,20 @@ export default async (req: Request, context: Context) => {
   const cpa     = carts > 0 ? spend / carts : 0;
   const aov     = carts > 0 ? revenue / carts : 0;
 
+  const prevSpend   = Number(prev?.spend ?? 0);
+  const prevCarts   = Number(prev?.carts ?? 0);
+  const prevRevenue = Number(prev?.revenue ?? 0);
+  const prevRoas    = prevSpend > 0 ? prevRevenue / prevSpend : 0;
+  const prevCpa     = prevCarts > 0 ? prevSpend / prevCarts : 0;
+  const prevAov     = prevCarts > 0 ? prevRevenue / prevCarts : 0;
+
   const kpis = {
-    spend:   { value: spend,   delta: delta(spend,   Number(prev?.spend ?? 0)) },
-    carts:   { value: carts,   delta: delta(carts,   Number(prev?.carts ?? 0)) },
-    tickets: { value: 0,       delta: 0 },
-    revenue: { value: revenue, delta: delta(revenue, Number(prev?.revenue ?? 0)) },
-    cpa:     { value: cpa,     delta: 0 },
-    roas:    { value: roas,    delta: 0 },
-    aov:     { value: aov,     delta: 0 },
+    spend:   { value: spend,   delta: delta(spend,   prevSpend) },
+    carts:   { value: carts,   delta: delta(carts,   prevCarts) },
+    revenue: { value: revenue, delta: delta(revenue, prevRevenue) },
+    cpa:     { value: cpa,     delta: delta(cpa,     prevCpa) },
+    roas:    { value: roas,    delta: delta(roas,    prevRoas) },
+    aov:     { value: aov,     delta: delta(aov,     prevAov) },
   };
 
   // Campañas agregadas del período
@@ -68,8 +74,8 @@ export default async (req: Request, context: Context) => {
       SUM(spend)::numeric       AS spend,
       SUM(impressions)::bigint  AS impressions,
       SUM(clicks)::bigint       AS clicks,
-      AVG(ctr)::numeric         AS ctr,
-      AVG(cpc)::numeric         AS cpc,
+      SUM(clicks)::numeric / NULLIF(SUM(impressions)::numeric, 0) AS ctr,
+      SUM(spend)::numeric  / NULLIF(SUM(clicks)::numeric, 0)      AS cpc,
       SUM(carts)::bigint        AS carts,
       SUM(revenue)::numeric     AS revenue
     FROM google_ads_campaigns

@@ -104,7 +104,7 @@ function Delta({ value, percent }: { value: number; percent?: boolean }) {
   return (
     <div className={cn("text-[11px] font-bold flex items-center justify-end gap-0.5 mt-1", isPos ? "text-[#009960]" : "text-orange-600")}>
       {isPos ? <ArrowUpRight size={10} strokeWidth={3} /> : <ArrowDownRight size={10} strokeWidth={3} />}
-      {Math.abs(value).toFixed(1)}{percent ? '%' : ''}
+      {Math.abs(value * 100).toFixed(1)}{percent ? '%' : ''}
     </div>
   );
 }

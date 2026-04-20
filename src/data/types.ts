@@ -20,6 +20,12 @@ export interface BusinessKPIs {
   aov: { value: number; delta: number };
 }
 
+export interface ChannelRevenue {
+  google: number;
+  meta: number;
+  other: number;
+}
+
 export interface ProductRoute {
   id: string;
   route: string;
