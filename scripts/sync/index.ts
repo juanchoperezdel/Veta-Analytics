@@ -1,4 +1,5 @@
 import { neon } from '@neondatabase/serverless';
+import { SignJWT, importPKCS8 } from 'jose';
 
 const sql = neon(process.env.DATABASE_URL!);
 
@@ -66,17 +67,28 @@ async function syncMetaAds(clientId: string, adAccountId: string, accessToken: s
 // ─── Google Ads ──────────────────────────────────────────────────────────────
 
 async function getGoogleAccessToken(): Promise<string> {
+  const sa = JSON.parse(process.env.GOOGLE_ADS_SERVICE_ACCOUNT_JSON!);
+  const privateKey = await importPKCS8(sa.private_key, 'RS256');
+  const now = Math.floor(Date.now() / 1000);
+  const jwt = await new SignJWT({ scope: 'https://www.googleapis.com/auth/adwords' })
+    .setProtectedHeader({ alg: 'RS256' })
+    .setIssuedAt(now)
+    .setExpirationTime(now + 3600)
+    .setIssuer(sa.client_email)
+    .setSubject(sa.client_email)
+    .setAudience('https://oauth2.googleapis.com/token')
+    .sign(privateKey);
+
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id:     process.env.GOOGLE_ADS_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_ADS_CLIENT_SECRET!,
-      refresh_token: process.env.GOOGLE_ADS_REFRESH_TOKEN!,
-      grant_type:    'refresh_token',
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
     }),
   });
-  const { access_token } = await res.json();
+  const { access_token, error, error_description } = await res.json() as any;
+  if (!access_token) throw new Error(`Google Ads token error: ${error} ${error_description}`);
   return access_token;
 }
 
@@ -97,7 +109,7 @@ async function syncGoogleAds(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v18/customers/${customerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {
@@ -111,7 +123,8 @@ async function syncGoogleAds(clientId: string, customerId: string) {
   );
 
   if (!res.ok) throw new Error(`Google Ads API error: ${res.status} ${await res.text()}`);
-  const { results = [] }: { results: any[] } = await res.json();
+  const batches: any[] = await res.json();
+  const results = batches.flatMap((b: any) => b.results ?? []);
 
   for (const row of results) {
     const date        = row.segments.date;
@@ -162,7 +175,7 @@ async function syncYouTube(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v18/customers/${customerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`,
     {
       method: 'POST',
       headers: {
@@ -350,9 +363,10 @@ async function main() {
       await syncGoogleAds(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
     } catch (e) { console.error(`  ✗ Google Ads:`, e); }
 
-    try {
-      await syncYouTube(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
-    } catch (e) { console.error(`  ✗ YouTube:`, e); }
+    // YouTube deshabilitado por ahora
+    // try {
+    //   await syncYouTube(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
+    // } catch (e) { console.error(`  ✗ YouTube:`, e); }
 
     try {
       await syncGA4(client.id, process.env.GA4_PROPERTY_ID!);
