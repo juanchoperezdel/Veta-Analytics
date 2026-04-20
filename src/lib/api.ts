@@ -39,13 +39,18 @@ async function apiFetch(path: string, options: RequestInit = {}) {
   return res.json();
 }
 
+function rangeParams(start?: string, end?: string) {
+  if (!start || !end) return '';
+  return `&start=${start}&end=${end}`;
+}
+
 export const api = {
   login: (email: string, password: string) =>
     apiFetch('/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
 
-  dashboard: (slug: string) => apiFetch(`/dashboard?slug=${slug}`),
-  googleAds: (slug: string) => apiFetch(`/google-ads?slug=${slug}`),
-  metaAds:   (slug: string) => apiFetch(`/meta-ads?slug=${slug}`),
-  products:  (slug: string) => apiFetch(`/products?slug=${slug}`),
-  youtube:   (slug: string) => apiFetch(`/youtube?slug=${slug}`),
+  dashboard: (slug: string, start?: string, end?: string) => apiFetch(`/dashboard?slug=${slug}${rangeParams(start, end)}`),
+  googleAds: (slug: string, start?: string, end?: string) => apiFetch(`/google-ads?slug=${slug}${rangeParams(start, end)}`),
+  metaAds:   (slug: string, start?: string, end?: string) => apiFetch(`/meta-ads?slug=${slug}${rangeParams(start, end)}`),
+  products:  (slug: string, start?: string, end?: string) => apiFetch(`/products?slug=${slug}${rangeParams(start, end)}`),
+  youtube:   (slug: string, start?: string, end?: string) => apiFetch(`/youtube?slug=${slug}${rangeParams(start, end)}`),
 };

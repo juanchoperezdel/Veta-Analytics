@@ -8,61 +8,76 @@ export default async (req: Request, context: Context) => {
   const user = await verifyToken(req);
   if (!user) return unauthorizedResponse();
 
-  const slug = new URL(req.url).searchParams.get('slug');
+  const params = new URL(req.url).searchParams;
+  const slug  = params.get('slug');
+  const start = params.get('start');
+  const end   = params.get('end');
   if (!slug) return errorResponse('Missing slug', 400);
   if (!(await authorizeSlug(user.userId, slug))) return unauthorizedResponse();
 
   const [client] = await sql`SELECT id FROM clients WHERE slug = ${slug}`;
   if (!client) return errorResponse('Client not found', 404);
 
-  const [kpisRow] = await sql`
-    SELECT * FROM meta_ads_kpis
+  const startDate = start ?? sql`CURRENT_DATE - 29`;
+  const endDate   = end   ?? sql`CURRENT_DATE`;
+
+  const [curr] = await sql`
+    SELECT SUM(spend)::numeric AS spend, SUM(purchases)::bigint AS purchases, SUM(revenue)::numeric AS revenue
+    FROM meta_ads_campaigns
+    WHERE client_id = ${client.id} AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+  `;
+
+  const [prev] = await sql`
+    SELECT SUM(spend)::numeric AS spend, SUM(purchases)::bigint AS purchases, SUM(revenue)::numeric AS revenue
+    FROM meta_ads_campaigns
     WHERE client_id = ${client.id}
-    ORDER BY snapshot_date DESC LIMIT 1
+      AND snapshot_date BETWEEN
+        (${startDate}::date - (${endDate}::date - ${startDate}::date + 1))
+        AND (${startDate}::date - 1)
   `;
 
-  const [prevKpis] = await sql`
-    SELECT * FROM meta_ads_kpis
-    WHERE client_id = ${client.id}
-    ORDER BY snapshot_date DESC LIMIT 1 OFFSET 1
+  function delta(c: number, p: number) { return (!p || p === 0) ? 0 : (c - p) / p; }
+
+  const spend     = Number(curr?.spend ?? 0);
+  const purchases = Number(curr?.purchases ?? 0);
+  const revenue   = Number(curr?.revenue ?? 0);
+  const roas      = spend > 0 ? revenue / spend : 0;
+  const cpa       = purchases > 0 ? spend / purchases : 0;
+  const aov       = purchases > 0 ? revenue / purchases : 0;
+
+  const kpis = {
+    spend:     { value: spend,     delta: delta(spend,     Number(prev?.spend ?? 0)) },
+    purchases: { value: purchases, delta: delta(purchases, Number(prev?.purchases ?? 0)) },
+    revenue:   { value: revenue,   delta: delta(revenue,   Number(prev?.revenue ?? 0)) },
+    cpa:       { value: cpa,       delta: 0 },
+    roas:      { value: roas,      delta: 0 },
+    aov:       { value: aov,       delta: 0 },
+  };
+
+  const rows = await sql`
+    SELECT
+      campaign_id,
+      MAX(type) AS type, MAX(segment) AS segment,
+      SUM(spend)::numeric     AS spend,
+      SUM(reach)::bigint      AS reach,
+      SUM(purchases)::bigint  AS purchases,
+      SUM(revenue)::numeric   AS revenue
+    FROM meta_ads_campaigns
+    WHERE client_id = ${client.id} AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+    GROUP BY campaign_id
+    ORDER BY SUM(spend) DESC
   `;
 
-  function delta(curr: number, prev: number) {
-    if (!prev || prev === 0) return 0;
-    return (curr - prev) / prev;
-  }
+  const campaigns = rows.map((c: any) => {
+    const s = Number(c.spend), r = Number(c.revenue), p = Number(c.purchases);
+    return {
+      id: c.campaign_id, type: c.type, segment: c.segment,
+      spend: s, reach: Number(c.reach), purchases: p, revenue: r,
+      cpa: p > 0 ? s / p : 0,
+      roas: s > 0 ? r / s : 0,
+      ctr: 0, cpc: 0,
+    };
+  });
 
-  const kpis = kpisRow ? {
-    spend:     { value: Number(kpisRow.spend),     delta: kpisRow.spend_delta     ?? delta(kpisRow.spend, prevKpis?.spend) },
-    purchases: { value: Number(kpisRow.purchases), delta: kpisRow.purchases_delta ?? delta(kpisRow.purchases, prevKpis?.purchases) },
-    revenue:   { value: Number(kpisRow.revenue),   delta: kpisRow.revenue_delta   ?? delta(kpisRow.revenue, prevKpis?.revenue) },
-    cpa:       { value: Number(kpisRow.cpa),       delta: kpisRow.cpa_delta       ?? delta(kpisRow.cpa, prevKpis?.cpa) },
-    roas:      { value: Number(kpisRow.roas),      delta: kpisRow.roas_delta      ?? delta(kpisRow.roas, prevKpis?.roas) },
-    aov:       { value: Number(kpisRow.aov),       delta: kpisRow.aov_delta       ?? delta(kpisRow.aov, prevKpis?.aov) },
-  } : null;
-
-  const latestDate = await sql`
-    SELECT MAX(snapshot_date) as d FROM meta_ads_campaigns WHERE client_id = ${client.id}
-  `;
-  const campaigns = await sql`
-    SELECT * FROM meta_ads_campaigns
-    WHERE client_id = ${client.id} AND snapshot_date = ${latestDate[0].d}
-    ORDER BY spend DESC
-  `;
-
-  const campaignsList = campaigns.map((c: any) => ({
-    id:        c.campaign_id,
-    type:      c.type,
-    segment:   c.segment,
-    spend:     Number(c.spend),
-    reach:     Number(c.reach),
-    purchases: Number(c.purchases),
-    revenue:   Number(c.revenue),
-    cpa:       Number(c.cpa),
-    roas:      Number(c.roas),
-    ctr:       Number(c.ctr),
-    cpc:       Number(c.cpc),
-  }));
-
-  return new Response(JSON.stringify({ kpis, campaigns: campaignsList }), { headers: corsHeaders() });
+  return new Response(JSON.stringify({ kpis, campaigns }), { headers: corsHeaders() });
 };

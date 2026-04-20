@@ -5,6 +5,8 @@ import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { api, getClients } from '@/lib/api';
+import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
+import type { DateRange } from '@/components/ui/DateRangePicker';
 import type { BusinessKPIs, ProductRoute } from '@/data/types';
 
 export default function Dashboard() {
@@ -12,6 +14,7 @@ export default function Dashboard() {
   const [kpis, setKpis] = useState<BusinessKPIs | null>(null);
   const [topRoutes, setTopRoutes] = useState<ProductRoute[]>([]);
   const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<DateRange>(defaultRange());
 
   const allClients = getClients();
   const currentClient = allClients.find(c => c.slug === clientSlug) ?? { name: clientSlug ?? '' };
@@ -20,13 +23,13 @@ export default function Dashboard() {
     if (!clientSlug) return;
     setLoading(true);
     Promise.all([
-      api.dashboard(clientSlug),
-      api.products(clientSlug),
+      api.dashboard(clientSlug, range.start, range.end),
+      api.products(clientSlug, range.start, range.end),
     ]).then(([dashData, prodData]) => {
       setKpis(dashData.businessKpis);
       setTopRoutes((prodData.routes ?? []).slice(0, 3));
     }).finally(() => setLoading(false));
-  }, [clientSlug]);
+  }, [clientSlug, range]);
 
   if (loading) return <div className="p-8 text-slate-400 animate-pulse">Cargando datos...</div>;
   if (!kpis) return <div className="p-8 text-slate-500">No hay datos disponibles</div>;
@@ -59,16 +62,7 @@ export default function Dashboard() {
           <span className="text-slate-900">Analítica</span>
         </div>
         
-        <div className="flex items-center gap-2">
-          <button className="bg-white border border-slate-200 shadow-sm rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2">
-            <Clock size={14} />
-            <span>Fechas</span>
-          </button>
-          <button className="bg-white border border-slate-200 shadow-sm rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
-            <span>Filtros</span>
-          </button>
-        </div>
+        <DateRangePicker value={range} onChange={setRange} />
       </div>
 
       {/* Hero Section: Jumbo revenue stat */}

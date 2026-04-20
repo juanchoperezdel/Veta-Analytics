@@ -8,23 +8,36 @@ export default async (req: Request, context: Context) => {
   const user = await verifyToken(req);
   if (!user) return unauthorizedResponse();
 
-  const slug = new URL(req.url).searchParams.get('slug');
+  const params = new URL(req.url).searchParams;
+  const slug  = params.get('slug');
+  const start = params.get('start');
+  const end   = params.get('end');
   if (!slug) return errorResponse('Missing slug', 400);
   if (!(await authorizeSlug(user.userId, slug))) return unauthorizedResponse();
 
   const [client] = await sql`SELECT id FROM clients WHERE slug = ${slug}`;
   if (!client) return errorResponse('Client not found', 404);
 
-  const latestDate = await sql`
-    SELECT MAX(snapshot_date) as d FROM youtube_videos WHERE client_id = ${client.id}
-  `;
-  const videos = await sql`
-    SELECT * FROM youtube_videos
-    WHERE client_id = ${client.id} AND snapshot_date = ${latestDate[0].d}
-    ORDER BY spend DESC
+  const startDate = start ?? sql`CURRENT_DATE - 29`;
+  const endDate   = end   ?? sql`CURRENT_DATE`;
+
+  const rows = await sql`
+    SELECT
+      video_id,
+      MAX(title) AS title, MAX(campaign) AS campaign,
+      SUM(impressions)::bigint  AS impressions,
+      SUM(clicks)::bigint       AS clicks,
+      AVG(ctr)::numeric         AS ctr,
+      SUM(conversions)::numeric AS conversions,
+      AVG(conversion_rate)::numeric AS conversion_rate,
+      SUM(spend)::numeric       AS spend
+    FROM youtube_videos
+    WHERE client_id = ${client.id} AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+    GROUP BY video_id
+    ORDER BY SUM(spend) DESC
   `;
 
-  const videosList = videos.map((v: any) => ({
+  const videos = rows.map((v: any) => ({
     id:             v.video_id,
     title:          v.title,
     campaign:       v.campaign,
@@ -36,5 +49,5 @@ export default async (req: Request, context: Context) => {
     spend:          Number(v.spend),
   }));
 
-  return new Response(JSON.stringify({ videos: videosList }), { headers: corsHeaders() });
+  return new Response(JSON.stringify({ videos }), { headers: corsHeaders() });
 };

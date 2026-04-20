@@ -8,63 +8,88 @@ export default async (req: Request, context: Context) => {
   const user = await verifyToken(req);
   if (!user) return unauthorizedResponse();
 
-  const slug = new URL(req.url).searchParams.get('slug');
+  const params = new URL(req.url).searchParams;
+  const slug  = params.get('slug');
+  const start = params.get('start');
+  const end   = params.get('end');
   if (!slug) return errorResponse('Missing slug', 400);
   if (!(await authorizeSlug(user.userId, slug))) return unauthorizedResponse();
 
   const [client] = await sql`SELECT id FROM clients WHERE slug = ${slug}`;
   if (!client) return errorResponse('Client not found', 404);
 
-  const [kpisRow] = await sql`
-    SELECT * FROM google_ads_kpis
+  const startDate = start ?? sql`CURRENT_DATE - 29`;
+  const endDate   = end   ?? sql`CURRENT_DATE`;
+
+  // KPIs agregados del período
+  const [curr] = await sql`
+    SELECT
+      SUM(spend)::numeric   AS spend,
+      SUM(carts)::bigint    AS carts,
+      SUM(revenue)::numeric AS revenue
+    FROM google_ads_campaigns
     WHERE client_id = ${client.id}
-    ORDER BY snapshot_date DESC LIMIT 1
+      AND snapshot_date BETWEEN ${startDate} AND ${endDate}
   `;
 
-  const [prevKpis] = await sql`
-    SELECT * FROM google_ads_kpis
+  const [prev] = await sql`
+    SELECT SUM(spend)::numeric AS spend, SUM(carts)::bigint AS carts, SUM(revenue)::numeric AS revenue
+    FROM google_ads_campaigns
     WHERE client_id = ${client.id}
-    ORDER BY snapshot_date DESC LIMIT 1 OFFSET 1
+      AND snapshot_date BETWEEN
+        (${startDate}::date - (${endDate}::date - ${startDate}::date + 1))
+        AND (${startDate}::date - 1)
   `;
 
-  function delta(curr: number, prev: number) {
-    if (!prev || prev === 0) return 0;
-    return (curr - prev) / prev;
-  }
+  function delta(c: number, p: number) { return (!p || p === 0) ? 0 : (c - p) / p; }
 
-  const kpis = kpisRow ? {
-    spend:   { value: Number(kpisRow.spend),   delta: kpisRow.spend_delta   ?? delta(kpisRow.spend, prevKpis?.spend) },
-    carts:   { value: Number(kpisRow.carts),   delta: kpisRow.carts_delta   ?? delta(kpisRow.carts, prevKpis?.carts) },
-    tickets: { value: Number(kpisRow.tickets ?? 0), delta: kpisRow.tickets_delta ?? 0 },
-    revenue: { value: Number(kpisRow.revenue), delta: kpisRow.revenue_delta ?? delta(kpisRow.revenue, prevKpis?.revenue) },
-    cpa:     { value: Number(kpisRow.cpa),     delta: kpisRow.cpa_delta     ?? delta(kpisRow.cpa, prevKpis?.cpa) },
-    roas:    { value: Number(kpisRow.roas),    delta: kpisRow.roas_delta    ?? delta(kpisRow.roas, prevKpis?.roas) },
-    aov:     { value: Number(kpisRow.aov),     delta: kpisRow.aov_delta     ?? delta(kpisRow.aov, prevKpis?.aov) },
-  } : null;
+  const spend   = Number(curr?.spend ?? 0);
+  const carts   = Number(curr?.carts ?? 0);
+  const revenue = Number(curr?.revenue ?? 0);
+  const roas    = spend > 0 ? revenue / spend : 0;
+  const cpa     = carts > 0 ? spend / carts : 0;
+  const aov     = carts > 0 ? revenue / carts : 0;
 
-  const latestDate = await sql`
-    SELECT MAX(snapshot_date) as d FROM google_ads_campaigns WHERE client_id = ${client.id}
+  const kpis = {
+    spend:   { value: spend,   delta: delta(spend,   Number(prev?.spend ?? 0)) },
+    carts:   { value: carts,   delta: delta(carts,   Number(prev?.carts ?? 0)) },
+    tickets: { value: 0,       delta: 0 },
+    revenue: { value: revenue, delta: delta(revenue, Number(prev?.revenue ?? 0)) },
+    cpa:     { value: cpa,     delta: 0 },
+    roas:    { value: roas,    delta: 0 },
+    aov:     { value: aov,     delta: 0 },
+  };
+
+  // Campañas agregadas del período
+  const rows = await sql`
+    SELECT
+      campaign_id,
+      MAX(name) AS name,
+      SUM(spend)::numeric       AS spend,
+      SUM(impressions)::bigint  AS impressions,
+      SUM(clicks)::bigint       AS clicks,
+      AVG(ctr)::numeric         AS ctr,
+      AVG(cpc)::numeric         AS cpc,
+      SUM(carts)::bigint        AS carts,
+      SUM(revenue)::numeric     AS revenue
+    FROM google_ads_campaigns
+    WHERE client_id = ${client.id}
+      AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+    GROUP BY campaign_id
+    ORDER BY SUM(spend) DESC
   `;
-  const campaigns = await sql`
-    SELECT * FROM google_ads_campaigns
-    WHERE client_id = ${client.id} AND snapshot_date = ${latestDate[0].d}
-    ORDER BY spend DESC
-  `;
 
-  const campaignsList = campaigns.map((c: any) => ({
-    id:         c.campaign_id,
-    name:       c.name,
-    spend:      Number(c.spend),
-    impressions: Number(c.impressions),
-    clicks:     Number(c.clicks),
-    ctr:        Number(c.ctr),
-    cpc:        Number(c.cpc),
-    users:      Number(c.users ?? 0),
-    retention:  Number(c.retention ?? 0),
-    carts:      Number(c.carts),
-    revenue:    Number(c.revenue),
-    roas:       Number(c.roas),
-  }));
+  const campaigns = rows.map((c: any) => {
+    const s = Number(c.spend), r = Number(c.revenue);
+    return {
+      id: c.campaign_id, name: c.name,
+      spend: s, impressions: Number(c.impressions), clicks: Number(c.clicks),
+      ctr: Number(c.ctr), cpc: Number(c.cpc),
+      users: 0, retention: 0,
+      carts: Number(c.carts), revenue: r,
+      roas: s > 0 ? r / s : 0,
+    };
+  });
 
-  return new Response(JSON.stringify({ kpis, campaigns: campaignsList }), { headers: corsHeaders() });
+  return new Response(JSON.stringify({ kpis, campaigns }), { headers: corsHeaders() });
 };

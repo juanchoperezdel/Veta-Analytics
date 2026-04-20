@@ -8,43 +8,63 @@ export default async (req: Request, context: Context) => {
   const user = await verifyToken(req);
   if (!user) return unauthorizedResponse();
 
-  const slug = new URL(req.url).searchParams.get('slug');
+  const params = new URL(req.url).searchParams;
+  const slug  = params.get('slug');
+  const start = params.get('start');
+  const end   = params.get('end');
   if (!slug) return errorResponse('Missing slug', 400);
-
   if (!(await authorizeSlug(user.userId, slug))) return unauthorizedResponse();
 
   const [client] = await sql`SELECT id FROM clients WHERE slug = ${slug}`;
   if (!client) return errorResponse('Client not found', 404);
 
-  const [kpis] = await sql`
-    SELECT * FROM business_kpis
+  // Período actual
+  const [curr] = await sql`
+    SELECT
+      SUM(users)::bigint           AS users,
+      SUM(sessions)::bigint        AS sessions,
+      SUM(revenue)::numeric        AS revenue,
+      SUM(carts)::bigint           AS carts,
+      SUM(tickets)::bigint         AS tickets,
+      AVG(conversion_rate)::numeric AS conversion_rate,
+      AVG(aov)::numeric             AS aov,
+      MAX(avg_session_duration)     AS avg_session_duration
+    FROM business_kpis
     WHERE client_id = ${client.id}
-    ORDER BY snapshot_date DESC
-    LIMIT 1
+      AND snapshot_date BETWEEN ${start ?? sql`CURRENT_DATE - 29`} AND ${end ?? sql`CURRENT_DATE`}
   `;
 
-  // Buscar período anterior para calcular deltas
-  const [prevKpis] = await sql`
-    SELECT * FROM business_kpis
+  // Período anterior (mismo largo)
+  const [prev] = await sql`
+    SELECT
+      SUM(users)::bigint           AS users,
+      SUM(sessions)::bigint        AS sessions,
+      SUM(revenue)::numeric        AS revenue,
+      SUM(carts)::bigint           AS carts,
+      SUM(tickets)::bigint         AS tickets,
+      AVG(conversion_rate)::numeric AS conversion_rate,
+      AVG(aov)::numeric             AS aov
+    FROM business_kpis
     WHERE client_id = ${client.id}
-    ORDER BY snapshot_date DESC
-    LIMIT 1 OFFSET 1
+      AND snapshot_date BETWEEN
+        (${start ?? sql`CURRENT_DATE - 29`}::date - (${end ?? sql`CURRENT_DATE`}::date - ${start ?? sql`CURRENT_DATE - 29`}::date + 1))
+        AND (${start ?? sql`CURRENT_DATE - 29`}::date - 1)
   `;
 
-  function delta(curr: number, prev: number) {
-    if (!prev || prev === 0) return 0;
-    return (curr - prev) / prev;
+  function delta(c: number, p: number) {
+    if (!p || p === 0) return 0;
+    return (c - p) / p;
   }
 
-  const businessKpis = kpis ? {
-    users:              { value: Number(kpis.users),            delta: kpis.users_delta            ?? delta(kpis.users, prevKpis?.users) },
-    sessions:           { value: Number(kpis.sessions),         delta: kpis.sessions_delta         ?? delta(kpis.sessions, prevKpis?.sessions) },
-    avgSessionDuration: { value: kpis.avg_session_duration,     delta: kpis.avg_session_duration_delta ?? 0 },
-    conversionRate:     { value: Number(kpis.conversion_rate),  delta: kpis.conversion_rate_delta  ?? delta(kpis.conversion_rate, prevKpis?.conversion_rate) },
-    carts:              { value: Number(kpis.carts),            delta: kpis.carts_delta            ?? delta(kpis.carts, prevKpis?.carts) },
-    tickets:            { value: Number(kpis.tickets),          delta: kpis.tickets_delta          ?? delta(kpis.tickets, prevKpis?.tickets) },
-    revenue:            { value: Number(kpis.revenue),          delta: kpis.revenue_delta          ?? delta(kpis.revenue, prevKpis?.revenue) },
-    aov:                { value: Number(kpis.aov),              delta: kpis.aov_delta              ?? delta(kpis.aov, prevKpis?.aov) },
+  const businessKpis = curr ? {
+    users:              { value: Number(curr.users ?? 0),            delta: delta(curr.users, prev?.users) },
+    sessions:           { value: Number(curr.sessions ?? 0),         delta: delta(curr.sessions, prev?.sessions) },
+    avgSessionDuration: { value: curr.avg_session_duration ?? '00:00', delta: 0 },
+    conversionRate:     { value: Number(curr.conversion_rate ?? 0),  delta: delta(curr.conversion_rate, prev?.conversion_rate) },
+    carts:              { value: Number(curr.carts ?? 0),            delta: delta(curr.carts, prev?.carts) },
+    tickets:            { value: Number(curr.tickets ?? 0),          delta: delta(curr.tickets, prev?.tickets) },
+    revenue:            { value: Number(curr.revenue ?? 0),          delta: delta(curr.revenue, prev?.revenue) },
+    aov:                { value: Number(curr.aov ?? 0),              delta: delta(curr.aov, prev?.aov) },
   } : null;
 
   return new Response(JSON.stringify({ businessKpis }), { headers: corsHeaders() });

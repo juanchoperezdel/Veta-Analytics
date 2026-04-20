@@ -4,6 +4,8 @@ import { ArrowUpRight, ArrowDownRight, Search } from 'lucide-react';
 import { formatCurrency, formatNumber, cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/Card';
 import { api, getClients } from '@/lib/api';
+import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
+import type { DateRange } from '@/components/ui/DateRangePicker';
 import type { MetaAdsCampaign, PlatformKPIs } from '@/data/types';
 
 export default function MetaAds() {
@@ -12,6 +14,7 @@ export default function MetaAds() {
   const [campaigns, setCampaigns] = useState<MetaAdsCampaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [range, setRange] = useState<DateRange>(defaultRange());
 
   const allClients = getClients();
   const currentClient = allClients.find(c => c.slug === clientSlug) ?? { name: clientSlug ?? '' };
@@ -19,10 +22,10 @@ export default function MetaAds() {
   useEffect(() => {
     if (!clientSlug) return;
     setLoading(true);
-    api.metaAds(clientSlug)
+    api.metaAds(clientSlug, range.start, range.end)
       .then(data => { setKpis(data.kpis); setCampaigns(data.campaigns ?? []); })
       .finally(() => setLoading(false));
-  }, [clientSlug]);
+  }, [clientSlug, range]);
 
   if (loading) return <div className="p-8 text-slate-400 animate-pulse">Cargando datos...</div>;
   if (!kpis) return <div className="p-8 text-slate-500">No hay datos disponibles</div>;
@@ -39,9 +42,7 @@ export default function MetaAds() {
           <span>/</span>
           <span className="text-slate-900">Meta Ads</span>
         </div>
-        <button className="bg-white border border-slate-200 shadow-sm rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-          Filtro de fechas
-        </button>
+        <DateRangePicker value={range} onChange={setRange} />
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-4">

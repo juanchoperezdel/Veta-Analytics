@@ -4,6 +4,8 @@ import { ArrowUpRight, ArrowDownRight, Search } from 'lucide-react';
 import { formatCurrency, formatNumber, cn } from '@/lib/utils';
 import { Card } from '@/components/ui/Card';
 import { api, getClients } from '@/lib/api';
+import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
+import type { DateRange } from '@/components/ui/DateRangePicker';
 import type { ProductRoute } from '@/data/types';
 
 export default function Products() {
@@ -11,6 +13,7 @@ export default function Products() {
   const [routes, setRoutes] = useState<ProductRoute[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [range, setRange] = useState<DateRange>(defaultRange());
 
   const allClients = getClients();
   const currentClient = allClients.find(c => c.slug === clientSlug) ?? { name: clientSlug ?? '' };
@@ -18,10 +21,10 @@ export default function Products() {
   useEffect(() => {
     if (!clientSlug) return;
     setLoading(true);
-    api.products(clientSlug)
+    api.products(clientSlug, range.start, range.end)
       .then(data => setRoutes(data.routes ?? []))
       .finally(() => setLoading(false));
-  }, [clientSlug]);
+  }, [clientSlug, range]);
 
   if (loading) return <div className="p-8 text-slate-400 animate-pulse">Cargando datos...</div>;
   if (!routes.length) return <div className="p-8 text-slate-500">No hay datos disponibles</div>;
@@ -36,9 +39,7 @@ export default function Products() {
           <span>/</span>
           <span className="text-slate-900">Rutas y Productos</span>
         </div>
-        <button className="bg-white border border-slate-200 shadow-sm rounded-lg px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-          Filtro de fechas
-        </button>
+        <DateRangePicker value={range} onChange={setRange} />
       </div>
 
       <div className="pt-4">
