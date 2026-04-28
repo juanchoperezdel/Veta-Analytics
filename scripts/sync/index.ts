@@ -23,14 +23,27 @@ function ga4DateToISO(d: string): string {
 async function syncMetaAds(clientId: string, adAccountId: string, accessToken: string) {
   const { since, until } = dateRange(30);
   const fields = [
-    'campaign_id', 'campaign_name', 'date_start',
+    'campaign_id', 'campaign_name', 'objective', 'date_start',
     'spend', 'reach', 'impressions', 'clicks', 'ctr', 'cpc',
     'actions', 'action_values',
   ].join(',');
 
+  // Forzamos attribution window estándar (7d_click + 1d_view) y incluimos todos los effective_status
+  // para capturar campañas pausadas/archivadas con impresiones en el rango.
+  const attribution = JSON.stringify(['7d_click', '1d_view']);
+  const filtering = JSON.stringify([{
+    field: 'campaign.effective_status',
+    operator: 'IN',
+    value: ['ACTIVE','PAUSED','DELETED','ARCHIVED','PENDING_REVIEW','DISAPPROVED','PREAPPROVED',
+            'PENDING_BILLING_INFO','CAMPAIGN_PAUSED','ADSET_PAUSED','IN_PROCESS','WITH_ISSUES'],
+  }]);
+
   const url = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
     `level=campaign&time_increment=1` +
     `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
+    `&use_unified_attribution_setting=true` +
+    `&action_attribution_windows=${encodeURIComponent(attribution)}` +
+    `&filtering=${encodeURIComponent(filtering)}` +
     `&fields=${fields}&access_token=${accessToken}&limit=500`;
 
   const res = await fetch(url);
@@ -38,9 +51,26 @@ async function syncMetaAds(clientId: string, adAccountId: string, accessToken: s
   const body = await res.json();
   const data: any[] = body.data ?? [];
 
+  // Para saber el effective_status actual (no viene en insights), una query paralela.
+  const statusByCampaign = new Map<string, string>();
+  try {
+    const sRes = await fetch(
+      `https://graph.facebook.com/v21.0/act_${adAccountId}/campaigns?` +
+      `fields=id,effective_status&limit=500&access_token=${accessToken}`
+    );
+    if (sRes.ok) {
+      const sBody = await sRes.json();
+      for (const c of (sBody.data ?? [])) statusByCampaign.set(c.id, c.effective_status);
+    }
+  } catch { /* status es opcional */ }
+
   for (const row of data) {
     const date      = row.date_start;
+    const objective = row.objective ?? null;
+    const status    = statusByCampaign.get(row.campaign_id) ?? null;
     const spend     = parseFloat(row.spend ?? '0');
+    // Usamos action_type='purchase' que es el rollup total de Meta — coincide con lo que el
+    // cliente ve en el Ads Manager. El diagnóstico confirmó que no duplica con fb_pixel/omni/onsite.
     const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
     const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
     const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
@@ -48,13 +78,15 @@ async function syncMetaAds(clientId: string, adAccountId: string, accessToken: s
 
     await sql`
       INSERT INTO meta_ads_campaigns
-        (client_id, snapshot_date, campaign_id, type, segment, spend, reach, purchases, revenue, cpa, roas, ctr, cpc)
+        (client_id, snapshot_date, campaign_id, type, effective_status, segment,
+         spend, reach, purchases, revenue, cpa, roas, ctr, cpc)
       VALUES
-        (${clientId}, ${date}, ${row.campaign_id}, 'Conversión', ${row.campaign_name},
+        (${clientId}, ${date}, ${row.campaign_id}, ${objective}, ${status}, ${row.campaign_name},
          ${spend}, ${parseInt(row.reach ?? '0')}, ${purchases}, ${revenue},
          ${cpa}, ${roas}, ${parseFloat(row.ctr ?? '0')}, ${parseFloat(row.cpc ?? '0')})
       ON CONFLICT (client_id, snapshot_date, campaign_id)
       DO UPDATE SET
+        type = EXCLUDED.type, effective_status = EXCLUDED.effective_status, segment = EXCLUDED.segment,
         spend = EXCLUDED.spend, reach = EXCLUDED.reach, purchases = EXCLUDED.purchases,
         revenue = EXCLUDED.revenue, cpa = EXCLUDED.cpa, roas = EXCLUDED.roas,
         ctr = EXCLUDED.ctr, cpc = EXCLUDED.cpc, synced_at = NOW()

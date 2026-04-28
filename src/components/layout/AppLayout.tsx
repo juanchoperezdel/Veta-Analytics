@@ -13,7 +13,7 @@ import {
   BarChart3
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { clients } from '@/data/mockData';
+import { getClients } from '@/lib/api';
 
 export default function AppLayout() {
   const { clientSlug } = useParams();
@@ -21,7 +21,10 @@ export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
 
-  const currentClient = clients.find(c => c.slug === clientSlug) || clients[0];
+  const clients = getClients();
+  const currentClient = clients.find(c => c.slug === clientSlug)
+    ?? clients[0]
+    ?? { id: '', slug: clientSlug ?? '', name: clientSlug ?? '', logoInitial: (clientSlug ?? '?')[0].toUpperCase() };
 
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: 'dashboard' },

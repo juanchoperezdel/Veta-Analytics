@@ -1,10 +1,13 @@
 import { useParams } from 'react-router-dom';
-import { clients } from '@/data/mockData';
+import { getClients } from '@/lib/api';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/Card';
 
 export default function Settings() {
   const { clientSlug } = useParams();
-  const currentClient = clients.find(c => c.slug === clientSlug) || clients[0];
+  const clients = getClients();
+  const currentClient = clients.find(c => c.slug === clientSlug)
+    ?? clients[0]
+    ?? { id: '', slug: clientSlug ?? '', name: clientSlug ?? '', logoInitial: (clientSlug ?? '?')[0].toUpperCase() };
 
   return (
     <div className="p-8 max-w-4xl mx-auto space-y-8">

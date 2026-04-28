@@ -21,14 +21,26 @@ export default async (req: Request, context: Context) => {
   const startDate = start ?? sql`CURRENT_DATE - 29`;
   const endDate   = end   ?? sql`CURRENT_DATE`;
 
+  // Sumamos spend/reach/clicks de TODAS las campañas activas en el rango, pero las ventas
+  // solo de las campañas de objetivo de conversión (OUTCOME_SALES / CONVERSIONS). Las de
+  // awareness, traffic, engagement igual reportan "purchases" por view-through, pero no
+  // son su objetivo y sobrecuentan las ventas atribuidas a otras campañas.
+  const SALES_OBJECTIVES = ['OUTCOME_SALES', 'CONVERSIONS', 'PRODUCT_CATALOG_SALES'];
+
   const [curr] = await sql`
-    SELECT SUM(spend)::numeric AS spend, SUM(purchases)::bigint AS purchases, SUM(revenue)::numeric AS revenue
+    SELECT
+      SUM(spend)::numeric AS spend,
+      SUM(CASE WHEN type = ANY(${SALES_OBJECTIVES}::text[]) THEN purchases ELSE 0 END)::bigint AS purchases,
+      SUM(CASE WHEN type = ANY(${SALES_OBJECTIVES}::text[]) THEN revenue   ELSE 0 END)::numeric AS revenue
     FROM meta_ads_campaigns
     WHERE client_id = ${client.id} AND snapshot_date BETWEEN ${startDate} AND ${endDate}
   `;
 
   const [prev] = await sql`
-    SELECT SUM(spend)::numeric AS spend, SUM(purchases)::bigint AS purchases, SUM(revenue)::numeric AS revenue
+    SELECT
+      SUM(spend)::numeric AS spend,
+      SUM(CASE WHEN type = ANY(${SALES_OBJECTIVES}::text[]) THEN purchases ELSE 0 END)::bigint AS purchases,
+      SUM(CASE WHEN type = ANY(${SALES_OBJECTIVES}::text[]) THEN revenue   ELSE 0 END)::numeric AS revenue
     FROM meta_ads_campaigns
     WHERE client_id = ${client.id}
       AND snapshot_date BETWEEN

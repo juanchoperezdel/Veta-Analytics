@@ -21,18 +21,30 @@ function secondsToMMSS(seconds: number): string {
 
 async function backfillMetaMonth(
   clientId: string, adAccountId: string, accessToken: string,
-  since: string, until: string
+  since: string, until: string,
+  statusByCampaign: Map<string, string>,
 ): Promise<number> {
   const fields = [
-    'campaign_id', 'campaign_name', 'date_start',
+    'campaign_id', 'campaign_name', 'objective', 'date_start',
     'spend', 'reach', 'impressions', 'clicks', 'ctr', 'cpc',
     'actions', 'action_values',
   ].join(',');
+
+  const attribution = JSON.stringify(['7d_click', '1d_view']);
+  const filtering = JSON.stringify([{
+    field: 'campaign.effective_status',
+    operator: 'IN',
+    value: ['ACTIVE','PAUSED','DELETED','ARCHIVED','PENDING_REVIEW','DISAPPROVED','PREAPPROVED',
+            'PENDING_BILLING_INFO','CAMPAIGN_PAUSED','ADSET_PAUSED','IN_PROCESS','WITH_ISSUES'],
+  }]);
 
   let url: string | null =
     `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
     `level=campaign&time_increment=1` +
     `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
+    `&use_unified_attribution_setting=true` +
+    `&action_attribution_windows=${encodeURIComponent(attribution)}` +
+    `&filtering=${encodeURIComponent(filtering)}` +
     `&fields=${fields}&access_token=${accessToken}&limit=500`;
 
   let total = 0;
@@ -44,6 +56,8 @@ async function backfillMetaMonth(
 
     for (const row of data) {
       const date      = row.date_start;
+      const objective = row.objective ?? null;
+      const status    = statusByCampaign.get(row.campaign_id) ?? null;
       const spend     = parseFloat(row.spend ?? '0');
       const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
       const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
@@ -52,13 +66,15 @@ async function backfillMetaMonth(
 
       await sql`
         INSERT INTO meta_ads_campaigns
-          (client_id, snapshot_date, campaign_id, type, segment, spend, reach, purchases, revenue, cpa, roas, ctr, cpc)
+          (client_id, snapshot_date, campaign_id, type, effective_status, segment,
+           spend, reach, purchases, revenue, cpa, roas, ctr, cpc)
         VALUES
-          (${clientId}, ${date}, ${row.campaign_id}, 'Conversión', ${row.campaign_name},
+          (${clientId}, ${date}, ${row.campaign_id}, ${objective}, ${status}, ${row.campaign_name},
            ${spend}, ${parseInt(row.reach ?? '0')}, ${purchases}, ${revenue},
            ${cpa}, ${roas}, ${parseFloat(row.ctr ?? '0')}, ${parseFloat(row.cpc ?? '0')})
         ON CONFLICT (client_id, snapshot_date, campaign_id)
         DO UPDATE SET
+          type = EXCLUDED.type, effective_status = EXCLUDED.effective_status, segment = EXCLUDED.segment,
           spend = EXCLUDED.spend, reach = EXCLUDED.reach, purchases = EXCLUDED.purchases,
           revenue = EXCLUDED.revenue, cpa = EXCLUDED.cpa, roas = EXCLUDED.roas,
           ctr = EXCLUDED.ctr, cpc = EXCLUDED.cpc, synced_at = NOW()
@@ -68,6 +84,21 @@ async function backfillMetaMonth(
     url = body.paging?.next ?? null;
   }
   return total;
+}
+
+async function fetchMetaCampaignStatuses(adAccountId: string, accessToken: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  let url: string | null =
+    `https://graph.facebook.com/v21.0/act_${adAccountId}/campaigns?` +
+    `fields=id,effective_status&limit=500&access_token=${accessToken}`;
+  while (url) {
+    const res = await fetch(url);
+    if (!res.ok) break;
+    const body = await res.json();
+    for (const c of (body.data ?? [])) map.set(c.id, c.effective_status);
+    url = body.paging?.next ?? null;
+  }
+  return map;
 }
 
 function pad(n: number) { return String(n).padStart(2, '0'); }
@@ -89,11 +120,13 @@ function monthRanges(since: string, until: string): { since: string; until: stri
 }
 
 async function backfillMeta(clientId: string, adAccountId: string, accessToken: string) {
+  const statusByCampaign = await fetchMetaCampaignStatuses(adAccountId, accessToken);
+  console.log(`  (status snapshot: ${statusByCampaign.size} campañas)`);
   const ranges = monthRanges(SINCE, UNTIL);
   let total = 0;
   for (const r of ranges) {
     console.log(`  Meta: ${r.since} → ${r.until}`);
-    const n = await backfillMetaMonth(clientId, adAccountId, accessToken, r.since, r.until);
+    const n = await backfillMetaMonth(clientId, adAccountId, accessToken, r.since, r.until, statusByCampaign);
     total += n;
   }
   console.log(`✓ Meta Ads: ${total} filas insertadas`);
