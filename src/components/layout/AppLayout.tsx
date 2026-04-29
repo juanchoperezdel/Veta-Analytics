@@ -10,7 +10,9 @@ import {
   MonitorPlay,
   TrendingUp,
   LineChart,
-  BarChart3
+  BarChart3,
+  Activity,
+  Filter
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getClients } from '@/lib/api';
@@ -27,11 +29,13 @@ export default function AppLayout() {
     ?? { id: '', slug: clientSlug ?? '', name: clientSlug ?? '', logoInitial: (clientSlug ?? '?')[0].toUpperCase() };
 
   const navItems = [
+    { icon: Activity, label: 'Pulso', path: 'pulse' },
     { icon: LayoutDashboard, label: 'Dashboard', path: 'dashboard' },
     { icon: TrendingUp, label: 'Google Ads', path: 'google-ads' },
     { icon: LineChart, label: 'Meta Ads', path: 'meta-ads' },
     { icon: BarChart3, label: 'Evolutivo', path: 'evolutivo' },
-    { icon: Map, label: 'Rutas / Prod.', path: 'products' },
+    { icon: Map, label: 'Rutas / Destinos', path: 'products' },
+    { icon: Filter, label: 'Embudo', path: 'funnel' },
     { icon: MonitorPlay, label: 'YouTube', path: 'youtube' },
   ];
 

@@ -1,6 +1,6 @@
 import { useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { ArrowUpRight, ArrowDownRight, Search } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Search, Image as ImageIcon } from 'lucide-react';
 import { formatCurrency, formatNumber, cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/Card';
 import { api, getClients } from '@/lib/api';
@@ -8,10 +8,20 @@ import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
 import type { DateRange } from '@/components/ui/DateRangePicker';
 import type { MetaAdsCampaign, PlatformKPIs } from '@/data/types';
 
+type Creative = {
+  adId: string; adName: string; campaignName: string; thumbnailUrl: string | null;
+  status: string | null; spend: number; impressions: number; clicks: number;
+  reach: number; purchases: number; revenue: number; cpa: number; roas: number; ctr: number;
+};
+type DemoItem = { value: string; spend: number; impressions: number; clicks: number; reach: number; purchases: number; revenue: number; cpa: number; roas: number };
+type Demographics = { age: DemoItem[]; gender: DemoItem[]; region: DemoItem[]; placement: DemoItem[] };
+
 export default function MetaAds() {
   const { clientSlug } = useParams();
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);
   const [campaigns, setCampaigns] = useState<MetaAdsCampaign[]>([]);
+  const [creatives, setCreatives] = useState<Creative[]>([]);
+  const [demographics, setDemographics] = useState<Demographics | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [range, setRange] = useState<DateRange>(defaultRange());
@@ -22,9 +32,16 @@ export default function MetaAds() {
   useEffect(() => {
     if (!clientSlug) return;
     setLoading(true);
-    api.metaAds(clientSlug, range.start, range.end)
-      .then(data => { setKpis(data.kpis); setCampaigns(data.campaigns ?? []); })
-      .finally(() => setLoading(false));
+    Promise.all([
+      api.metaAds(clientSlug, range.start, range.end),
+      api.creatives(clientSlug, range.start, range.end),
+      api.demographics(clientSlug, range.start, range.end),
+    ]).then(([metaData, creativesData, demoData]) => {
+      setKpis(metaData.kpis);
+      setCampaigns(metaData.campaigns ?? []);
+      setCreatives(creativesData.creatives ?? []);
+      setDemographics(demoData);
+    }).finally(() => setLoading(false));
   }, [clientSlug, range]);
 
   if (loading) return <div className="p-8 text-slate-400 animate-pulse">Cargando datos...</div>;
@@ -53,6 +70,33 @@ export default function MetaAds() {
         <SmallKpiCard title="ROAS"      value={`${kpis.roas.value.toFixed(2)}x`}           delta={kpis.roas.delta} />
         <SmallKpiCard title="AOV"       value={formatCurrency(kpis.aov?.value ?? 0)}       delta={kpis.aov?.delta ?? 0} />
       </div>
+
+      {/* Demographics: 4 cards en grid */}
+      {demographics && (demographics.age.length > 0 || demographics.gender.length > 0) && (
+        <div className="pt-4">
+          <h3 className="text-lg font-bold text-slate-900 tracking-tight mb-4">Quién compra</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <DemoCard title="Por edad" items={demographics.age} />
+            <DemoCard title="Por género" items={demographics.gender} />
+            <DemoCard title="Top regiones" items={demographics.region} />
+            <DemoCard title="Por placement" items={demographics.placement} />
+          </div>
+        </div>
+      )}
+
+      {/* Creative gallery */}
+      {creatives.length > 0 && (
+        <div className="pt-4">
+          <h3 className="text-lg font-bold text-slate-900 tracking-tight mb-4">
+            Top creatives <span className="text-sm font-medium text-slate-400">· por spend</span>
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {creatives.slice(0, 12).map(c => (
+              <CreativeCard key={c.adId} creative={c} />
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="pt-4">
         <div className="flex items-center justify-between mb-4">
@@ -121,6 +165,69 @@ function SmallKpiCard({ title, value, delta, inverseDelta = false }: { title: st
           </span>
         </div>
       </CardContent>
+    </Card>
+  );
+}
+
+function CreativeCard({ creative }: { creative: Creative; key?: any }) {
+  return (
+    <Card className="overflow-hidden hover:shadow-[0_8px_30px_-12px_rgba(0,0,0,0.15)] transition-all duration-300">
+      <div className="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
+        {creative.thumbnailUrl ? (
+          <img src={creative.thumbnailUrl} alt={creative.adName} className="w-full h-full object-cover" loading="lazy" />
+        ) : (
+          <ImageIcon size={32} className="text-slate-300" />
+        )}
+      </div>
+      <div className="p-3 space-y-1">
+        <div className="text-xs font-semibold text-slate-900 truncate" title={creative.adName}>{creative.adName}</div>
+        <div className="text-[10px] text-slate-400 truncate" title={creative.campaignName}>{creative.campaignName}</div>
+        <div className="flex items-center justify-between pt-1 text-[11px]">
+          <span className="text-slate-500">Spend</span>
+          <span className="font-semibold text-slate-900">{formatCurrency(creative.spend)}</span>
+        </div>
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-slate-500">ROAS</span>
+          <span className={cn("font-bold", creative.roas >= 3 ? "text-emerald-600" : creative.roas >= 1.5 ? "text-amber-600" : "text-orange-600")}>
+            {creative.roas > 0 ? `${creative.roas.toFixed(2)}x` : '—'}
+          </span>
+        </div>
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-slate-500">Compras</span>
+          <span className="font-semibold text-slate-700">{formatNumber(creative.purchases)}</span>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function DemoCard({ title, items }: { title: string; items: DemoItem[] }) {
+  if (!items?.length) return null;
+  const maxSpend = Math.max(...items.map(i => i.spend), 1);
+  return (
+    <Card className="p-5">
+      <h4 className="text-sm font-bold text-slate-900 mb-3">{title}</h4>
+      <ul className="space-y-2">
+        {items.slice(0, 8).map(item => (
+          <li key={item.value} className="space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-medium text-slate-700">{item.value}</span>
+              <span className="tabular-nums text-slate-500">
+                {formatCurrency(item.spend)} · ROAS {item.roas.toFixed(1)}x
+              </span>
+            </div>
+            <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all duration-500",
+                  item.roas >= 3 ? "bg-emerald-500" : item.roas >= 1.5 ? "bg-amber-500" : "bg-orange-500"
+                )}
+                style={{ width: `${(item.spend / maxSpend) * 100}%` }}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
     </Card>
   );
 }

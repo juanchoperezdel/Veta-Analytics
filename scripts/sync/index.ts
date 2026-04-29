@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { SignJWT, importPKCS8 } from 'jose';
+import { parseRoute } from './parse-routes';
 
 const sql = neon(process.env.DATABASE_URL!);
 
@@ -76,20 +77,22 @@ async function syncMetaAds(clientId: string, adAccountId: string, accessToken: s
     const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
     const roas      = spend > 0 ? revenue / spend : 0;
 
+    const route     = parseRoute(row.campaign_name);
+
     await sql`
       INSERT INTO meta_ads_campaigns
         (client_id, snapshot_date, campaign_id, type, effective_status, segment,
-         spend, reach, purchases, revenue, cpa, roas, ctr, cpc)
+         spend, reach, purchases, revenue, cpa, roas, ctr, cpc, route)
       VALUES
         (${clientId}, ${date}, ${row.campaign_id}, ${objective}, ${status}, ${row.campaign_name},
          ${spend}, ${parseInt(row.reach ?? '0')}, ${purchases}, ${revenue},
-         ${cpa}, ${roas}, ${parseFloat(row.ctr ?? '0')}, ${parseFloat(row.cpc ?? '0')})
+         ${cpa}, ${roas}, ${parseFloat(row.ctr ?? '0')}, ${parseFloat(row.cpc ?? '0')}, ${route})
       ON CONFLICT (client_id, snapshot_date, campaign_id)
       DO UPDATE SET
         type = EXCLUDED.type, effective_status = EXCLUDED.effective_status, segment = EXCLUDED.segment,
         spend = EXCLUDED.spend, reach = EXCLUDED.reach, purchases = EXCLUDED.purchases,
         revenue = EXCLUDED.revenue, cpa = EXCLUDED.cpa, roas = EXCLUDED.roas,
-        ctr = EXCLUDED.ctr, cpc = EXCLUDED.cpc, synced_at = NOW()
+        ctr = EXCLUDED.ctr, cpc = EXCLUDED.cpc, route = EXCLUDED.route, synced_at = NOW()
     `;
   }
 
@@ -164,21 +167,25 @@ async function syncGoogleAds(clientId: string, customerId: string) {
     const conversions = parseFloat(row.metrics.conversions ?? '0');
     const revenue     = parseFloat(row.metrics.conversionsValue ?? '0');
 
+    const route       = parseRoute(row.campaign.name);
+
     await sql`
       INSERT INTO google_ads_campaigns
-        (client_id, snapshot_date, campaign_id, name, spend, impressions, clicks, ctr, cpc, carts, revenue, roas)
+        (client_id, snapshot_date, campaign_id, name, spend, impressions, clicks, ctr, cpc, carts, revenue, roas, route)
       VALUES
         (${clientId}, ${date}, ${String(row.campaign.id)}, ${row.campaign.name},
          ${spend}, ${row.metrics.impressions ?? 0}, ${row.metrics.clicks ?? 0},
          ${parseFloat(row.metrics.ctr ?? '0')},
          ${(row.metrics.averageCpc ?? 0) / 1_000_000},
          ${Math.round(conversions)}, ${revenue},
-         ${spend > 0 ? revenue / spend : 0})
+         ${spend > 0 ? revenue / spend : 0},
+         ${route})
       ON CONFLICT (client_id, snapshot_date, campaign_id)
       DO UPDATE SET
         spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
         ctr = EXCLUDED.ctr, cpc = EXCLUDED.cpc, carts = EXCLUDED.carts,
-        revenue = EXCLUDED.revenue, roas = EXCLUDED.roas, synced_at = NOW()
+        revenue = EXCLUDED.revenue, roas = EXCLUDED.roas,
+        route = EXCLUDED.route, synced_at = NOW()
     `;
   }
 
@@ -251,6 +258,249 @@ async function syncYouTube(clientId: string, customerId: string) {
   }
 
   console.log(`✓ YouTube synced: ${results.length} daily rows`);
+}
+
+// ─── Google Ads — Search Terms ───────────────────────────────────────────────
+
+async function syncGoogleAdsSearchTerms(clientId: string, customerId: string) {
+  const accessToken = await getGoogleAccessToken();
+
+  const query = `
+    SELECT
+      segments.date,
+      search_term_view.search_term,
+      metrics.clicks, metrics.impressions, metrics.cost_micros,
+      metrics.conversions, metrics.conversions_value
+    FROM search_term_view
+    WHERE segments.date DURING LAST_30_DAYS
+      AND metrics.impressions > 0
+    ORDER BY segments.date DESC, metrics.clicks DESC
+  `;
+
+  const res = await fetch(
+    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'developer-token': process.env.GOOGLE_ADS_DEV_TOKEN!,
+        'login-customer-id': process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID!,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    }
+  );
+
+  if (!res.ok) throw new Error(`Search Terms API error: ${res.status} ${await res.text()}`);
+  const batches: any[] = await res.json();
+  const results = batches.flatMap((b: any) => b.results ?? []);
+
+  // Aggregate por (date, search_term) — la API puede devolver duplicados por ad_group.
+  const agg = new Map<string, { date: string; term: string; clicks: number; impr: number; cost: number; conv: number; convValue: number }>();
+  for (const row of results) {
+    const date = row.segments.date;
+    const term = row.searchTermView?.searchTerm ?? '';
+    if (!term) continue;
+    const key = `${date}|${term}`;
+    const ex = agg.get(key);
+    const clicks = Number(row.metrics?.clicks ?? 0);
+    const impr   = Number(row.metrics?.impressions ?? 0);
+    const cost   = Number(row.metrics?.costMicros ?? 0) / 1_000_000;
+    const conv   = parseFloat(row.metrics?.conversions ?? '0');
+    const convValue = parseFloat(row.metrics?.conversionsValue ?? '0');
+    if (ex) {
+      ex.clicks += clicks; ex.impr += impr; ex.cost += cost; ex.conv += conv; ex.convValue += convValue;
+    } else {
+      agg.set(key, { date, term, clicks, impr, cost, conv, convValue });
+    }
+  }
+
+  // Insertamos en chunks paralelos de 30 (evita serializar 1000s de queries HTTP secuenciales)
+  const entries = [...agg.values()];
+  const concurrency = 30;
+  for (let i = 0; i < entries.length; i += concurrency) {
+    const chunk = entries.slice(i, i + concurrency);
+    await Promise.all(chunk.map(r => {
+      const route = parseRoute(r.term);
+      return sql`
+        INSERT INTO google_ads_search_terms
+          (client_id, snapshot_date, search_term, clicks, impressions, cost, conversions, conv_value, route)
+        VALUES
+          (${clientId}, ${r.date}, ${r.term}, ${r.clicks}, ${r.impr}, ${r.cost}, ${r.conv}, ${r.convValue}, ${route})
+        ON CONFLICT (client_id, snapshot_date, search_term)
+        DO UPDATE SET
+          clicks = EXCLUDED.clicks, impressions = EXCLUDED.impressions,
+          cost = EXCLUDED.cost, conversions = EXCLUDED.conversions,
+          conv_value = EXCLUDED.conv_value, route = EXCLUDED.route, synced_at = NOW()
+      `;
+    }));
+  }
+
+  console.log(`✓ Google Ads search terms synced: ${agg.size} unique (date,term) pairs`);
+}
+
+// ─── Meta — Creatives (ad-level con thumbnails) ──────────────────────────────
+// Rango corto (7 días) para evitar rate limits en level=ad — y de todos modos
+// el dashboard solo muestra los TOP por spend, no histórico largo.
+
+async function syncMetaCreatives(clientId: string, adAccountId: string, accessToken: string) {
+  const { since, until } = dateRange(7);
+  const fields = [
+    'ad_id', 'ad_name',
+    'campaign_id', 'campaign_name',
+    'date_start',
+    'spend', 'impressions', 'clicks', 'reach',
+    'actions', 'action_values', 'ctr',
+  ].join(',');
+
+  const url = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
+    `level=ad&time_increment=1` +
+    `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
+    `&filtering=${encodeURIComponent(JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]))}` +
+    `&fields=${fields}&access_token=${accessToken}&limit=500`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Meta creatives API error: ${res.status} ${await res.text()}`);
+  const body = await res.json();
+  const data: any[] = body.data ?? [];
+
+  // Pedimos creative info (thumbnail_url + effective_status) — solo para los top ads por spend
+  // y con sleep de 1.5s entre batches para no pegar rate limit.
+  const spendByAd = new Map<string, number>();
+  for (const r of data) {
+    spendByAd.set(r.ad_id, (spendByAd.get(r.ad_id) ?? 0) + parseFloat(r.spend ?? '0'));
+  }
+  const topAdIds = [...spendByAd.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 60)  // top 60 — más que suficiente para una galería de "top creatives"
+    .map(([id]) => id);
+
+  const adInfo = new Map<string, { thumb: string | null; status: string | null }>();
+  for (let i = 0; i < topAdIds.length; i += 50) {
+    const chunk = topAdIds.slice(i, i + 50);
+    const batch = chunk.map(id => ({
+      method: 'GET',
+      relative_url: `${id}?fields=effective_status,creative{thumbnail_url}`,
+    }));
+    try {
+      const bRes = await fetch('https://graph.facebook.com/v21.0/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          access_token: accessToken,
+          batch: JSON.stringify(batch),
+        }),
+      });
+      const bBody = await bRes.json();
+      if (Array.isArray(bBody)) {
+        bBody.forEach((sub: any, idx: number) => {
+          if (sub?.code === 200) {
+            const parsed = JSON.parse(sub.body);
+            adInfo.set(chunk[idx], {
+              thumb: parsed.creative?.thumbnail_url ?? null,
+              status: parsed.effective_status ?? null,
+            });
+          }
+        });
+      }
+    } catch { /* thumbnails son opcionales */ }
+    if (i + 50 < topAdIds.length) await new Promise(r => setTimeout(r, 1500));
+  }
+
+  for (const row of data) {
+    const date      = row.date_start;
+    const spend     = parseFloat(row.spend ?? '0');
+    const impressions = parseInt(row.impressions ?? '0');
+    const clicks    = parseInt(row.clicks ?? '0');
+    const reach     = parseInt(row.reach ?? '0');
+    const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
+    const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
+    const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
+    const roas      = spend > 0 ? revenue / spend : 0;
+    const ctr       = parseFloat(row.ctr ?? '0');
+    const info      = adInfo.get(row.ad_id);
+
+    await sql`
+      INSERT INTO meta_ads_creatives
+        (client_id, snapshot_date, ad_id, ad_name, campaign_id, campaign_name,
+         thumbnail_url, effective_status,
+         spend, impressions, clicks, reach, purchases, revenue, cpa, roas, ctr)
+      VALUES
+        (${clientId}, ${date}, ${row.ad_id}, ${row.ad_name}, ${row.campaign_id}, ${row.campaign_name},
+         ${info?.thumb ?? null}, ${info?.status ?? null},
+         ${spend}, ${impressions}, ${clicks}, ${reach}, ${purchases}, ${revenue},
+         ${cpa}, ${roas}, ${ctr})
+      ON CONFLICT (client_id, snapshot_date, ad_id)
+      DO UPDATE SET
+        ad_name = EXCLUDED.ad_name, campaign_id = EXCLUDED.campaign_id, campaign_name = EXCLUDED.campaign_name,
+        thumbnail_url = EXCLUDED.thumbnail_url, effective_status = EXCLUDED.effective_status,
+        spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
+        reach = EXCLUDED.reach, purchases = EXCLUDED.purchases, revenue = EXCLUDED.revenue,
+        cpa = EXCLUDED.cpa, roas = EXCLUDED.roas, ctr = EXCLUDED.ctr, synced_at = NOW()
+    `;
+  }
+
+  console.log(`✓ Meta creatives synced: ${data.length} ad-day rows (${adInfo.size} unique ads with thumbnails)`);
+}
+
+// ─── Meta — Breakdowns (age, gender, region, placement) ──────────────────────
+
+async function syncMetaBreakdowns(clientId: string, adAccountId: string, accessToken: string) {
+  const { since, until } = dateRange(30);
+  const breakdownDims = ['age', 'gender', 'region', 'publisher_platform'];
+
+  for (const dim of breakdownDims) {
+    const fields = [
+      'date_start', 'spend', 'impressions', 'clicks', 'reach',
+      'actions', 'action_values',
+    ].join(',');
+
+    const url = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
+      `level=account&time_increment=1` +
+      `&breakdowns=${dim}` +
+      `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
+      `&fields=${fields}&access_token=${accessToken}&limit=500`;
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.error(`  ✗ Meta breakdown ${dim}: ${res.status}`);
+        continue;
+      }
+      const body = await res.json();
+      const data: any[] = body.data ?? [];
+
+      for (const row of data) {
+        const date      = row.date_start;
+        const value     = String(row[dim] ?? 'unknown');
+        const spend     = parseFloat(row.spend ?? '0');
+        const impressions = parseInt(row.impressions ?? '0');
+        const clicks    = parseInt(row.clicks ?? '0');
+        const reach     = parseInt(row.reach ?? '0');
+        const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
+        const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
+        const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
+        const roas      = spend > 0 ? revenue / spend : 0;
+
+        await sql`
+          INSERT INTO meta_ads_breakdowns
+            (client_id, snapshot_date, dimension_type, dimension_value,
+             spend, impressions, clicks, reach, purchases, revenue, cpa, roas)
+          VALUES
+            (${clientId}, ${date}, ${dim}, ${value},
+             ${spend}, ${impressions}, ${clicks}, ${reach}, ${purchases}, ${revenue}, ${cpa}, ${roas})
+          ON CONFLICT (client_id, snapshot_date, dimension_type, dimension_value)
+          DO UPDATE SET
+            spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
+            reach = EXCLUDED.reach, purchases = EXCLUDED.purchases, revenue = EXCLUDED.revenue,
+            cpa = EXCLUDED.cpa, roas = EXCLUDED.roas, synced_at = NOW()
+        `;
+      }
+      console.log(`  ✓ Meta breakdown ${dim}: ${data.length} rows`);
+    } catch (e: any) {
+      console.error(`  ✗ Meta breakdown ${dim}:`, e.message);
+    }
+  }
 }
 
 // ─── GA4 (KPIs + rutas) ──────────────────────────────────────────────────────
@@ -392,8 +642,20 @@ async function main() {
     } catch (e) { console.error(`  ✗ Meta Ads:`, e); }
 
     try {
+      await syncMetaCreatives(client.id, process.env.META_AD_ACCOUNT_ID!, process.env.META_ACCESS_TOKEN!);
+    } catch (e) { console.error(`  ✗ Meta Creatives:`, e); }
+
+    try {
+      await syncMetaBreakdowns(client.id, process.env.META_AD_ACCOUNT_ID!, process.env.META_ACCESS_TOKEN!);
+    } catch (e) { console.error(`  ✗ Meta Breakdowns:`, e); }
+
+    try {
       await syncGoogleAds(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
     } catch (e) { console.error(`  ✗ Google Ads:`, e); }
+
+    try {
+      await syncGoogleAdsSearchTerms(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
+    } catch (e) { console.error(`  ✗ Google Ads Search Terms:`, e); }
 
     // YouTube deshabilitado por ahora
     // try {
@@ -402,7 +664,12 @@ async function main() {
 
     try {
       await syncGA4(client.id, process.env.GA4_PROPERTY_ID!);
-    } catch (e) { console.error(`  ✗ GA4:`, e); }
+    } catch (e: any) {
+      // GA4 puede tener token expirado (OAuth en modo Testing expira a los 7 días).
+      // No frenamos el resto del sync — los demás canales siguen actualizándose.
+      const isAuth = String(e?.message ?? '').includes('invalid_grant') || String(e?.message ?? '').includes('expired');
+      console.error(`  ✗ GA4${isAuth ? ' (token EXPIRADO — refrescar GA4_SERVICE_ACCOUNT_JSON)' : ''}:`, e?.message ?? e);
+    }
   }
 
   console.log('\n✓ Sync complete\n');

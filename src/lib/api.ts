@@ -48,10 +48,15 @@ export const api = {
   login: (email: string, password: string) =>
     apiFetch('/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
 
-  dashboard: (slug: string, start?: string, end?: string) => apiFetch(`/dashboard?slug=${slug}${rangeParams(start, end)}`),
-  googleAds: (slug: string, start?: string, end?: string) => apiFetch(`/google-ads?slug=${slug}${rangeParams(start, end)}`),
-  metaAds:   (slug: string, start?: string, end?: string) => apiFetch(`/meta-ads?slug=${slug}${rangeParams(start, end)}`),
-  products:  (slug: string, start?: string, end?: string) => apiFetch(`/products?slug=${slug}${rangeParams(start, end)}`),
-  youtube:   (slug: string, start?: string, end?: string) => apiFetch(`/youtube?slug=${slug}${rangeParams(start, end)}`),
-  evolutivo: (slug: string) => apiFetch(`/evolutivo?slug=${slug}`),
+  dashboard:    (slug: string, start?: string, end?: string) => apiFetch(`/dashboard?slug=${slug}${rangeParams(start, end)}`),
+  googleAds:    (slug: string, start?: string, end?: string) => apiFetch(`/google-ads?slug=${slug}${rangeParams(start, end)}`),
+  metaAds:      (slug: string, start?: string, end?: string) => apiFetch(`/meta-ads?slug=${slug}${rangeParams(start, end)}`),
+  products:     (slug: string, start?: string, end?: string) => apiFetch(`/products?slug=${slug}${rangeParams(start, end)}`),
+  youtube:      (slug: string, start?: string, end?: string) => apiFetch(`/youtube?slug=${slug}${rangeParams(start, end)}`),
+  evolutivo:    (slug: string) => apiFetch(`/evolutivo?slug=${slug}`),
+  pulse:        (slug: string) => apiFetch(`/pulse?slug=${slug}`),
+  searchTerms:  (slug: string, start?: string, end?: string) => apiFetch(`/search-terms?slug=${slug}${rangeParams(start, end)}`),
+  creatives:    (slug: string, start?: string, end?: string) => apiFetch(`/creatives?slug=${slug}${rangeParams(start, end)}`),
+  demographics: (slug: string, start?: string, end?: string) => apiFetch(`/demographics?slug=${slug}${rangeParams(start, end)}`),
+  funnel:       (slug: string, start?: string, end?: string) => apiFetch(`/funnel?slug=${slug}${rangeParams(start, end)}`),
 };

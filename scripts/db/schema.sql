@@ -144,6 +144,79 @@ CREATE TABLE IF NOT EXISTS product_routes (
   UNIQUE (client_id, snapshot_date, route)
 );
 
+-- ─── Extensiones para inteligencia de rutas ────────────────────────────────
+-- Andesmar no tiene e-commerce tracking en GA4, así que la ruta se infiere del
+-- nombre de la campaña (Meta/Google Ads) con un parser regex en el sync.
+
+ALTER TABLE meta_ads_campaigns   ADD COLUMN IF NOT EXISTS route TEXT;
+ALTER TABLE google_ads_campaigns ADD COLUMN IF NOT EXISTS route TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_meta_ads_campaigns_route   ON meta_ads_campaigns   (client_id, route, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_google_ads_campaigns_route ON google_ads_campaigns (client_id, route, snapshot_date);
+
+-- Search Terms reales de Google Ads (queries que activaron ads)
+-- Una fila por (cliente, fecha, término) — el agregado se hace al servir.
+CREATE TABLE IF NOT EXISTS google_ads_search_terms (
+  id             SERIAL PRIMARY KEY,
+  client_id      TEXT NOT NULL REFERENCES clients(id),
+  snapshot_date  DATE NOT NULL,
+  search_term    TEXT NOT NULL,
+  clicks         BIGINT,
+  impressions    BIGINT,
+  cost           NUMERIC(18,2),
+  conversions    NUMERIC(10,4),
+  conv_value     NUMERIC(18,2),
+  route          TEXT,             -- inferido del search term (ej: "andesmar mendoza" → "Mendoza")
+  synced_at      TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (client_id, snapshot_date, search_term)
+);
+CREATE INDEX IF NOT EXISTS idx_search_terms_route ON google_ads_search_terms (client_id, route, snapshot_date);
+
+-- Creatives de Meta Ads (ad-level performance con thumbnails)
+CREATE TABLE IF NOT EXISTS meta_ads_creatives (
+  id              SERIAL PRIMARY KEY,
+  client_id       TEXT NOT NULL REFERENCES clients(id),
+  snapshot_date   DATE NOT NULL,
+  ad_id           TEXT NOT NULL,
+  ad_name         TEXT,
+  campaign_id     TEXT,
+  campaign_name   TEXT,
+  thumbnail_url   TEXT,
+  effective_status TEXT,
+  spend           NUMERIC(18,2),
+  impressions     BIGINT,
+  clicks          BIGINT,
+  reach           BIGINT,
+  purchases       BIGINT,
+  revenue         NUMERIC(18,2),
+  cpa             NUMERIC(18,2),
+  roas            NUMERIC(10,2),
+  ctr             NUMERIC(8,6),
+  synced_at       TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (client_id, snapshot_date, ad_id)
+);
+
+-- Breakdowns demográficos / placements de Meta Ads
+-- dimension_type ∈ {age, gender, region, publisher_platform}
+CREATE TABLE IF NOT EXISTS meta_ads_breakdowns (
+  id              SERIAL PRIMARY KEY,
+  client_id       TEXT NOT NULL REFERENCES clients(id),
+  snapshot_date   DATE NOT NULL,
+  dimension_type  TEXT NOT NULL,
+  dimension_value TEXT NOT NULL,
+  spend           NUMERIC(18,2),
+  impressions     BIGINT,
+  clicks          BIGINT,
+  reach           BIGINT,
+  purchases       BIGINT,
+  revenue         NUMERIC(18,2),
+  cpa             NUMERIC(18,2),
+  roas            NUMERIC(10,2),
+  synced_at       TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (client_id, snapshot_date, dimension_type, dimension_value)
+);
+CREATE INDEX IF NOT EXISTS idx_meta_breakdowns ON meta_ads_breakdowns (client_id, dimension_type, snapshot_date);
+
 -- Videos de YouTube Ads
 CREATE TABLE IF NOT EXISTS youtube_videos (
   id               SERIAL PRIMARY KEY,

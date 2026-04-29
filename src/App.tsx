@@ -8,6 +8,8 @@ import Products from './pages/Products';
 import YouTube from './pages/YouTube';
 import Evolutivo from './pages/Evolutivo';
 import Login from './pages/Login';
+import Pulse from './pages/Pulse';
+import Funnel from './pages/Funnel';
 import { getToken } from './lib/api';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -19,16 +21,18 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/" element={<Navigate to="/andesmar/dashboard" replace />} />
+        <Route path="/" element={<Navigate to="/andesmar/pulse" replace />} />
 
         <Route path="/:clientSlug" element={<RequireAuth><AppLayout /></RequireAuth>}>
-          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route index element={<Navigate to="pulse" replace />} />
+          <Route path="pulse"      element={<Pulse />} />
           <Route path="dashboard"  element={<Dashboard />} />
           <Route path="google-ads" element={<GoogleAds />} />
           <Route path="meta-ads"   element={<MetaAds />} />
           <Route path="products"   element={<Products />} />
-          <Route path="youtube"    element={<YouTube />} />
           <Route path="evolutivo"  element={<Evolutivo />} />
+          <Route path="funnel"     element={<Funnel />} />
+          <Route path="youtube"    element={<YouTube />} />
         </Route>
       </Routes>
     </Router>
