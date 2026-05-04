@@ -279,6 +279,7 @@ function DayOfMonthChart({ days }: { days: DomAgg[] | undefined }) {
   if (totalRevenue === 0) {
     return <div className="text-sm text-slate-400 py-8 text-center">No hay revenue registrado para los días en este rango.</div>;
   }
+  const daysWithData = days.filter(d => (Number(d.revenue) || 0) > 0).length;
   const maxRevenue = Math.max(...days.map(d => Number(d.revenue) || 0), 1);
   // Grid de 31 días — días sin datos quedan vacíos
   const dayMap = new Map(days.map(d => [Number(d.day), d]));
@@ -308,10 +309,15 @@ function DayOfMonthChart({ days }: { days: DomAgg[] | undefined }) {
       <div className="flex justify-between text-[10px] text-slate-400 mt-2 font-semibold">
         <span>1</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>31</span>
       </div>
-      <div className="flex items-center gap-4 mt-3 text-[10px] text-slate-500">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500" /> Por $1 → $3+</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-500" /> $1.5-3</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-500" /> menos de $1.5</span>
+      <div className="flex items-center justify-between gap-4 mt-3 text-[10px] text-slate-500">
+        <div className="flex items-center gap-4">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-500" /> Por $1 → $3+</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-500" /> $1.5-3</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-500" /> menos de $1.5</span>
+        </div>
+        {daysWithData < 7 && (
+          <span className="text-amber-700 italic">⚠ Solo {daysWithData} días con data en el rango. Probá un período más amplio (ej: "Mes pasado" o "Últimos 30 días") para ver el patrón completo.</span>
+        )}
       </div>
     </div>
   );
