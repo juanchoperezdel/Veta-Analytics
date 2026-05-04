@@ -87,16 +87,93 @@ export default async (req: Request, context: Context) => {
     ORDER BY SUM(spend) DESC
   `;
 
+  // Health score: necesitamos el spend/conv de últimos 7 y 14 días por campaña
+  // para calcular tendencia y "días sin conversión".
+  const last7 = await sql`
+    SELECT campaign_id,
+           SUM(spend)::numeric AS spend,
+           SUM(purchases)::bigint AS purchases,
+           SUM(revenue)::numeric AS revenue
+    FROM meta_ads_campaigns
+    WHERE client_id = ${client.id} AND snapshot_date >= CURRENT_DATE - 6
+    GROUP BY campaign_id
+  `;
+  const prev7 = await sql`
+    SELECT campaign_id,
+           SUM(spend)::numeric AS spend,
+           SUM(purchases)::bigint AS purchases,
+           SUM(revenue)::numeric AS revenue
+    FROM meta_ads_campaigns
+    WHERE client_id = ${client.id}
+      AND snapshot_date BETWEEN CURRENT_DATE - 13 AND CURRENT_DATE - 7
+    GROUP BY campaign_id
+  `;
+  const last7Map = new Map(last7.map((r: any) => [r.campaign_id, r]));
+  const prev7Map = new Map(prev7.map((r: any) => [r.campaign_id, r]));
+
   const campaigns = rows.map((c: any) => {
     const s = Number(c.spend), r = Number(c.revenue), p = Number(c.purchases);
+    const isSalesObjective = SALES_OBJECTIVES.includes(c.type);
+    const l7 = last7Map.get(c.campaign_id) as any;
+    const p7 = prev7Map.get(c.campaign_id) as any;
+    const last7Spend = Number(l7?.spend ?? 0);
+    const last7Purch = Number(l7?.purchases ?? 0);
+    const last7Rev   = Number(l7?.revenue ?? 0);
+    const prev7Rev   = Number(p7?.revenue ?? 0);
+    const trend7d    = prev7Rev > 0 ? (last7Rev - prev7Rev) / prev7Rev : 0;
+    const last7Roas  = last7Spend > 0 ? last7Rev / last7Spend : 0;
+
+    const health = scoreHealth({
+      isSalesObjective,
+      last7Spend,
+      last7Purch,
+      last7Roas,
+      trend7d,
+    });
+
     return {
       id: c.campaign_id, type: c.type, segment: c.segment,
       spend: s, reach: Number(c.reach), purchases: p, revenue: r,
       cpa: p > 0 ? s / p : 0,
       roas: s > 0 ? r / s : 0,
       ctr: 0, cpc: 0,
+      health,
+      last7d: { spend: last7Spend, purchases: last7Purch, revenue: last7Rev, roas: last7Roas, trendVsPrev7: trend7d },
     };
   });
 
   return new Response(JSON.stringify({ kpis, campaigns }), { headers: corsHeaders() });
 };
+
+// Score: 'scale' / 'ok' / 'optimize' / 'pause' basado en reglas simples.
+type HealthInput = {
+  isSalesObjective: boolean;
+  last7Spend: number;
+  last7Purch: number;
+  last7Roas: number;
+  trend7d: number;
+};
+function scoreHealth(x: HealthInput): { status: 'scale' | 'ok' | 'optimize' | 'pause'; reason: string } {
+  // Si no es objetivo de venta, no aplicamos las reglas de ROAS — solo trafficking.
+  if (!x.isSalesObjective) {
+    if (x.last7Spend < 100) return { status: 'ok', reason: 'Bajo gasto, no requiere acción.' };
+    return { status: 'ok', reason: 'Campaña no-conversión, ROAS no aplica.' };
+  }
+  // Reglas para campañas de conversión
+  if (x.last7Spend < 1000) {
+    return { status: 'ok', reason: 'Bajo gasto en 7d, no es prioritaria.' };
+  }
+  if (x.last7Purch === 0 && x.last7Spend > 5000) {
+    return { status: 'pause', reason: `0 conversiones con $${x.last7Spend.toFixed(0)} gastado en 7d. Pausar o revisar urgente.` };
+  }
+  if (x.last7Roas >= 3 && x.trend7d >= 0) {
+    return { status: 'scale', reason: `ROAS ${x.last7Roas.toFixed(1)}x en 7d con tendencia positiva. Considerá subir budget.` };
+  }
+  if (x.last7Roas < 1.5) {
+    return { status: 'optimize', reason: `ROAS ${x.last7Roas.toFixed(1)}x en 7d. Revisar creatives o targeting.` };
+  }
+  if (x.trend7d < -0.2) {
+    return { status: 'optimize', reason: `Revenue cayó ${(Math.abs(x.trend7d) * 100).toFixed(0)}% vs semana anterior.` };
+  }
+  return { status: 'ok', reason: `ROAS ${x.last7Roas.toFixed(1)}x estable.` };
+}

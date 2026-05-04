@@ -191,10 +191,11 @@ CREATE TABLE IF NOT EXISTS meta_ads_creatives (
   revenue         NUMERIC(18,2),
   cpa             NUMERIC(18,2),
   roas            NUMERIC(10,2),
-  ctr             NUMERIC(8,6),
+  ctr             NUMERIC(10,4),    -- CTR de Meta viene como porcentaje (ej: 2.345 = 2.345%)
   synced_at       TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (client_id, snapshot_date, ad_id)
 );
+ALTER TABLE meta_ads_creatives ALTER COLUMN ctr TYPE NUMERIC(10,4);
 
 -- Breakdowns demográficos / placements de Meta Ads
 -- dimension_type ∈ {age, gender, region, publisher_platform}
@@ -216,6 +217,50 @@ CREATE TABLE IF NOT EXISTS meta_ads_breakdowns (
   UNIQUE (client_id, snapshot_date, dimension_type, dimension_value)
 );
 CREATE INDEX IF NOT EXISTS idx_meta_breakdowns ON meta_ads_breakdowns (client_id, dimension_type, snapshot_date);
+
+-- ─── Estacionalidad: hourly + day-of-week ──────────────────────────────────
+-- Para identificar mejor día/hora para pautar. Una fila por (cliente, día, hora)
+-- agregando todas las campañas. Solo últimos 30 días rolling.
+
+CREATE TABLE IF NOT EXISTS meta_ads_hourly (
+  id            SERIAL PRIMARY KEY,
+  client_id     TEXT NOT NULL REFERENCES clients(id),
+  snapshot_date DATE NOT NULL,
+  hour          INT  NOT NULL,            -- 0-23
+  spend         NUMERIC(18,2),
+  impressions   BIGINT,
+  clicks        BIGINT,
+  purchases     BIGINT,
+  revenue       NUMERIC(18,2),
+  synced_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (client_id, snapshot_date, hour)
+);
+
+CREATE TABLE IF NOT EXISTS google_ads_hourly (
+  id            SERIAL PRIMARY KEY,
+  client_id     TEXT NOT NULL REFERENCES clients(id),
+  snapshot_date DATE NOT NULL,
+  hour          INT  NOT NULL,            -- 0-23
+  spend         NUMERIC(18,2),
+  impressions   BIGINT,
+  clicks        BIGINT,
+  conversions   NUMERIC(10,4),
+  conv_value    NUMERIC(18,2),
+  synced_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (client_id, snapshot_date, hour)
+);
+
+-- ─── Pacing presupuestario ─────────────────────────────────────────────────
+-- Budget mensual por cliente. Una fila por mes (primer día del mes).
+CREATE TABLE IF NOT EXISTS client_budgets (
+  id            SERIAL PRIMARY KEY,
+  client_id     TEXT NOT NULL REFERENCES clients(id),
+  month         DATE NOT NULL,           -- primer día del mes (ej: 2026-04-01)
+  planned_spend NUMERIC(18,2) NOT NULL,  -- ARS planeados para ese mes
+  notes         TEXT,
+  updated_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (client_id, month)
+);
 
 -- Videos de YouTube Ads
 CREATE TABLE IF NOT EXISTS youtube_videos (

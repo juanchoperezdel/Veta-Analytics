@@ -14,7 +14,12 @@ type Creative = {
   reach: number; purchases: number; revenue: number; cpa: number; roas: number; ctr: number;
 };
 type DemoItem = { value: string; spend: number; impressions: number; clicks: number; reach: number; purchases: number; revenue: number; cpa: number; roas: number };
-type Demographics = { age: DemoItem[]; gender: DemoItem[]; region: DemoItem[]; placement: DemoItem[] };
+type Mismatch = {
+  dimension: string;
+  overspent: { value: string; spendShare: number; purchShare: number; gap: number; roas: number; spend: number; purchases: number }[];
+  underspent: { value: string; spendShare: number; purchShare: number; gap: number; roas: number; spend: number; purchases: number }[];
+};
+type Demographics = { age: DemoItem[]; gender: DemoItem[]; region: DemoItem[]; placement: DemoItem[]; mismatches: Mismatch[] };
 
 export default function MetaAds() {
   const { clientSlug } = useParams();
@@ -84,6 +89,47 @@ export default function MetaAds() {
         </div>
       )}
 
+      {/* Mismatch: gastás de más en X pero el que mejor convierte es Y */}
+      {demographics?.mismatches && demographics.mismatches.length > 0 && (
+        <div className="pt-4">
+          <h3 className="text-lg font-bold text-slate-900 tracking-tight mb-4">
+            Recomendaciones de redistribución <span className="text-sm font-medium text-slate-400">· spend share vs conversion share</span>
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {demographics.mismatches.map((m, i) => (
+              <Card key={i} className="p-5">
+                <h4 className="text-sm font-bold text-slate-900 mb-3">{m.dimension}</h4>
+                {m.overspent.length === 0 && m.underspent.length === 0 && (
+                  <div className="text-xs text-slate-400 py-2">Sin desbalances significativos.</div>
+                )}
+                {m.overspent.length > 0 && (
+                  <div className="mb-3">
+                    <div className="text-[11px] font-semibold text-orange-700 mb-2">Sobre-gastando</div>
+                    {m.overspent.map(x => (
+                      <div key={x.value} className="text-xs py-1 flex justify-between">
+                        <span className="text-slate-700 font-medium">{x.value}</span>
+                        <span className="text-slate-500">{(x.spendShare * 100).toFixed(0)}% spend → {(x.purchShare * 100).toFixed(0)}% compras</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {m.underspent.length > 0 && (
+                  <div>
+                    <div className="text-[11px] font-semibold text-emerald-700 mb-2">Sub-gastando (oportunidad)</div>
+                    {m.underspent.map(x => (
+                      <div key={x.value} className="text-xs py-1 flex justify-between">
+                        <span className="text-slate-700 font-medium">{x.value}</span>
+                        <span className="text-slate-500">{(x.spendShare * 100).toFixed(0)}% spend → {(x.purchShare * 100).toFixed(0)}% compras · ROAS {x.roas.toFixed(1)}x</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Creative gallery */}
       {creatives.length > 0 && (
         <div className="pt-4">
@@ -120,23 +166,23 @@ export default function MetaAds() {
                 <tr>
                   <th className="px-5 py-4 font-semibold">Segmento / Nombre</th>
                   <th className="px-5 py-4 font-semibold">Tipo</th>
+                  <th className="px-5 py-4 font-semibold">Salud</th>
                   <th className="px-5 py-4 font-semibold text-right">Inversión</th>
-                  <th className="px-5 py-4 font-semibold text-right">Alcance</th>
                   <th className="px-5 py-4 font-semibold text-right">Compras</th>
-                  <th className="px-5 py-4 font-semibold text-right">CPA</th>
                   <th className="px-5 py-4 font-semibold text-right">Ingresos</th>
                   <th className="px-5 py-4 font-semibold text-right">ROAS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {filtered.map(camp => (
+                {filtered.map((camp: any) => (
                   <tr key={camp.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-4 font-medium text-slate-900">{camp.segment}</td>
-                    <td className="px-5 py-4 text-slate-500">{camp.type}</td>
+                    <td className="px-5 py-4 text-slate-500 text-xs">{camp.type}</td>
+                    <td className="px-5 py-4">
+                      {camp.health ? <HealthBadge status={camp.health.status} reason={camp.health.reason} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
                     <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatCurrency(camp.spend)}</td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatNumber(camp.reach)}</td>
                     <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatNumber(camp.purchases)}</td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatCurrency(camp.cpa)}</td>
                     <td className="px-5 py-4 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(camp.revenue)}</td>
                     <td className="px-5 py-4 text-right tabular-nums font-bold text-[#009960]">{camp.roas > 0 ? `${camp.roas.toFixed(2)}x` : '-'}</td>
                   </tr>
@@ -166,6 +212,20 @@ function SmallKpiCard({ title, value, delta, inverseDelta = false }: { title: st
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function HealthBadge({ status, reason }: { status: 'scale' | 'ok' | 'optimize' | 'pause'; reason: string }) {
+  const map = {
+    scale:    { label: 'Escalar',  bg: 'bg-emerald-50', text: 'text-emerald-700' },
+    ok:       { label: 'OK',       bg: 'bg-slate-100',  text: 'text-slate-600'   },
+    optimize: { label: 'Optimizar', bg: 'bg-amber-50',  text: 'text-amber-700'   },
+    pause:    { label: 'Pausar',   bg: 'bg-red-50',     text: 'text-red-700'     },
+  }[status];
+  return (
+    <span title={reason} className={cn("inline-flex px-2 py-0.5 rounded-md text-xs font-bold cursor-help", map.bg, map.text)}>
+      {map.label}
+    </span>
   );
 }
 

@@ -1,0 +1,29 @@
+name: Weekly Report
+
+on:
+  schedule:
+    # Lunes 12:00 UTC = 9:00 AM Buenos Aires (UTC-3)
+    - cron: '0 12 * * 1'
+  workflow_dispatch:        # permite trigger manual desde GitHub UI
+
+jobs:
+  send-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Send weekly report email
+        run: npx tsx scripts/weekly-report.ts
+        env:
+          DATABASE_URL:       ${{ secrets.DATABASE_URL }}
+          RESEND_API_KEY:     ${{ secrets.RESEND_API_KEY }}
+          REPORT_FROM_EMAIL:  ${{ secrets.REPORT_FROM_EMAIL }}

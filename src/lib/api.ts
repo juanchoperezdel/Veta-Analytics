@@ -59,4 +59,9 @@ export const api = {
   creatives:    (slug: string, start?: string, end?: string) => apiFetch(`/creatives?slug=${slug}${rangeParams(start, end)}`),
   demographics: (slug: string, start?: string, end?: string) => apiFetch(`/demographics?slug=${slug}${rangeParams(start, end)}`),
   funnel:       (slug: string, start?: string, end?: string) => apiFetch(`/funnel?slug=${slug}${rangeParams(start, end)}`),
+  competitors:  (slug: string, start?: string, end?: string) => apiFetch(`/competitors?slug=${slug}${rangeParams(start, end)}`),
+  seasonality:  (slug: string) => apiFetch(`/seasonality?slug=${slug}`),
+  budgetsList:  (slug: string) => apiFetch(`/budgets?slug=${slug}`),
+  budgetsSet:   (slug: string, month: string, plannedSpend: number, notes?: string) =>
+    apiFetch(`/budgets?slug=${slug}`, { method: 'POST', body: JSON.stringify({ month, plannedSpend, notes }) }),
 };

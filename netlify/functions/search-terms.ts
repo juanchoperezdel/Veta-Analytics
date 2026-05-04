@@ -82,6 +82,16 @@ export default async (req: Request, _context: Context) => {
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 30);
 
+  // Ahorro mensual estimado si se cortaran TODAS las wasted queries
+  // Normalizado a 30 días — si el rango es de 30 días ya es 1:1.
+  const days = (start && end)
+    ? Math.max(1, Math.ceil((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1)
+    : 30;
+  const wastedTotalCost = wastedSpend.reduce((s, t) => s + t.cost, 0);
+  const monthlySavings = (wastedTotalCost / days) * 30;
+  // Lista lista para copy-paste a Google Ads (formato exact match negative keyword)
+  const negativeKeywordsList = wastedSpend.map(t => `[${t.term}]`).join('\n');
+
   // Top by volume: más impresiones (señal de demanda agregada)
   const topByVolume = [...enriched]
     .sort((a, b) => b.impressions - a.impressions)
@@ -107,5 +117,10 @@ export default async (req: Request, _context: Context) => {
     topByVolume,
     demand,
     totalUniqueTerms: enriched.length,
+    actionable: {
+      monthlySavings,
+      negativeKeywordsCount: wastedSpend.length,
+      negativeKeywordsList,
+    },
   }), { headers: corsHeaders() });
 };

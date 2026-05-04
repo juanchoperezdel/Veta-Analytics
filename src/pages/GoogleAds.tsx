@@ -19,6 +19,21 @@ type SearchTermsData = {
   topByVolume: SearchTerm[];
   demand: { route: string; clicks: number; impressions: number; cost: number; conversions: number }[];
   totalUniqueTerms: number;
+  actionable: {
+    monthlySavings: number;
+    negativeKeywordsCount: number;
+    negativeKeywordsList: string;
+  };
+};
+type CompetitorBreakdown = { competitor: string; terms: number; clicks: number; impressions: number; cost: number; conversions: number; convValue: number; cpa: number; roas: number; conversionRate: number };
+type CompetitorsData = {
+  configured: boolean;
+  message?: string;
+  competitors?: string[];
+  breakdown?: CompetitorBreakdown[];
+  totals?: { cost: number; clicks: number; impressions: number; conversions: number; convValue: number; terms: number; cpa: number; roas: number; conversionRate: number };
+  monthlyProjection?: { cost: number; conversions: number; convValue: number };
+  topTerms?: { term: string; clicks: number; cost: number; conversions: number; convValue: number }[];
 };
 
 export default function GoogleAds() {
@@ -26,6 +41,7 @@ export default function GoogleAds() {
   const [kpis, setKpis] = useState<PlatformKPIs | null>(null);
   const [campaigns, setCampaigns] = useState<GoogleAdsCampaign[]>([]);
   const [searchTerms, setSearchTerms] = useState<SearchTermsData | null>(null);
+  const [competitors, setCompetitors] = useState<CompetitorsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [range, setRange] = useState<DateRange>(defaultRange());
@@ -39,10 +55,12 @@ export default function GoogleAds() {
     Promise.all([
       api.googleAds(clientSlug, range.start, range.end),
       api.searchTerms(clientSlug, range.start, range.end),
-    ]).then(([gads, st]) => {
+      api.competitors(clientSlug, range.start, range.end),
+    ]).then(([gads, st, comp]) => {
       setKpis(gads.kpis);
       setCampaigns(gads.campaigns ?? []);
       setSearchTerms(st);
+      setCompetitors(comp);
     }).finally(() => setLoading(false));
   }, [clientSlug, range]);
 
@@ -70,6 +88,84 @@ export default function GoogleAds() {
         <SmallKpiCard title="Carritos"   value={formatNumber(kpis.carts?.value ?? 0)}     delta={kpis.carts?.delta ?? 0} />
         <SmallKpiCard title="AOV"        value={formatCurrency(kpis.aov?.value ?? 0)}     delta={kpis.aov?.delta ?? 0} />
       </div>
+
+      {/* Análisis de competencia */}
+      {competitors?.configured && competitors.totals && competitors.totals.cost > 0 && (
+        <div className="pt-4">
+          <h3 className="text-lg font-bold text-slate-900 tracking-tight mb-4">
+            Spend en queries de competencia
+          </h3>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <Card className="p-5 lg:col-span-1">
+              <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Gasto total</div>
+              <div className="text-3xl font-bold text-slate-900 mt-2 tabular-nums">{formatCurrency(competitors.totals.cost)}</div>
+              <div className="text-[11px] text-slate-500 mt-1">en {competitors.totals.terms} queries de competencia</div>
+              <div className="mt-4 pt-4 border-t border-slate-100">
+                <div className="text-xs text-slate-500">Conversion rate</div>
+                <div className="text-lg font-bold text-slate-900 tabular-nums">{(competitors.totals.conversionRate * 100).toFixed(2)}%</div>
+                <div className="text-[10px] text-slate-400">vs ROAS {competitors.totals.roas.toFixed(2)}x</div>
+              </div>
+              {competitors.monthlyProjection && (
+                <div className="mt-3 pt-3 border-t border-slate-100">
+                  <div className="text-xs text-slate-500">Proyección mensual</div>
+                  <div className="text-lg font-bold text-orange-700 tabular-nums">{formatCurrency(competitors.monthlyProjection.cost)}</div>
+                  <div className="text-[10px] text-slate-400">si seguís a este pace</div>
+                </div>
+              )}
+            </Card>
+            <Card className="p-5 lg:col-span-2">
+              <h4 className="text-sm font-bold text-slate-900 mb-3">Por marca competidora</h4>
+              <table className="w-full text-xs">
+                <thead className="text-slate-400">
+                  <tr>
+                    <th className="text-left py-1.5 px-2 font-semibold">Competidor</th>
+                    <th className="text-right py-1.5 px-2 font-semibold">Queries</th>
+                    <th className="text-right py-1.5 px-2 font-semibold">Costo</th>
+                    <th className="text-right py-1.5 px-2 font-semibold">Conv.</th>
+                    <th className="text-right py-1.5 px-2 font-semibold">ROAS</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {competitors.breakdown!.map(c => (
+                    <tr key={c.competitor} className="hover:bg-slate-50">
+                      <td className="py-1.5 px-2 font-semibold text-slate-900">{c.competitor}</td>
+                      <td className="py-1.5 px-2 text-right tabular-nums text-slate-600">{c.terms}</td>
+                      <td className="py-1.5 px-2 text-right tabular-nums text-slate-700">{formatCurrency(c.cost)}</td>
+                      <td className="py-1.5 px-2 text-right tabular-nums text-slate-600">{c.conversions.toFixed(1)}</td>
+                      <td className={cn("py-1.5 px-2 text-right tabular-nums font-bold", c.roas >= 1 ? "text-emerald-700" : "text-orange-700")}>
+                        {c.cost > 0 ? `${c.roas.toFixed(2)}x` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* Negative keywords accionables (panel arriba de search terms) */}
+      {searchTerms?.actionable && searchTerms.actionable.negativeKeywordsCount > 0 && (
+        <div className="pt-4">
+          <Card className="p-5 bg-gradient-to-br from-emerald-50/30 to-white border-emerald-200">
+            <div className="flex items-start gap-4">
+              <div className="bg-emerald-100 text-emerald-700 p-2 rounded-lg shrink-0">
+                <Sparkles size={20} strokeWidth={2.5} />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-base font-bold text-slate-900">
+                  Ahorro estimado: {formatCurrency(searchTerms.actionable.monthlySavings)}/mes
+                </h4>
+                <p className="text-sm text-slate-600 mt-1">
+                  Tenemos {searchTerms.actionable.negativeKeywordsCount} queries que están gastando sin convertir.
+                  Agregalas como <strong>negative keywords (exact match)</strong> en Google Ads y ahorrás esa plata.
+                </p>
+                <NegativeKeywordsCopy text={searchTerms.actionable.negativeKeywordsList} />
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {/* Search Terms: 3 secciones */}
       {searchTerms && searchTerms.totalUniqueTerms > 0 && (
@@ -132,24 +228,24 @@ export default function GoogleAds() {
               <thead className="bg-[#FCFCFD] text-slate-500 border-b border-slate-100">
                 <tr>
                   <th className="px-5 py-4 font-semibold">Campaña</th>
+                  <th className="px-5 py-4 font-semibold">Salud</th>
                   <th className="px-5 py-4 font-semibold text-right">Inversión</th>
-                  <th className="px-5 py-4 font-semibold text-right">Impresiones</th>
                   <th className="px-5 py-4 font-semibold text-right">Clics</th>
-                  <th className="px-5 py-4 font-semibold text-right">CTR</th>
-                  <th className="px-5 py-4 font-semibold text-right">CPC</th>
+                  <th className="px-5 py-4 font-semibold text-right">Carritos</th>
                   <th className="px-5 py-4 font-semibold text-right">Ingresos</th>
                   <th className="px-5 py-4 font-semibold text-right">ROAS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {filtered.map(camp => (
+                {filtered.map((camp: any) => (
                   <tr key={camp.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-5 py-4 font-medium text-slate-900">{camp.name}</td>
+                    <td className="px-5 py-4">
+                      {camp.health ? <HealthBadge status={camp.health.status} reason={camp.health.reason} /> : <span className="text-slate-300 text-xs">—</span>}
+                    </td>
                     <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatCurrency(camp.spend)}</td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatNumber(camp.impressions)}</td>
                     <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatNumber(camp.clicks)}</td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatPercent(camp.ctr)}</td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatCurrency(camp.cpc)}</td>
+                    <td className="px-5 py-4 text-right tabular-nums text-slate-600">{formatNumber(camp.carts)}</td>
                     <td className="px-5 py-4 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(camp.revenue)}</td>
                     <td className="px-5 py-4 text-right tabular-nums font-bold text-[#009960]">{camp.roas > 0 ? `${camp.roas.toFixed(2)}x` : '-'}</td>
                   </tr>
@@ -159,6 +255,37 @@ export default function GoogleAds() {
           </div>
         </Card>
       </div>
+    </div>
+  );
+}
+
+function HealthBadge({ status, reason }: { status: 'scale' | 'ok' | 'optimize' | 'pause'; reason: string }) {
+  const map = {
+    scale:    { label: 'Escalar',  bg: 'bg-emerald-50', text: 'text-emerald-700' },
+    ok:       { label: 'OK',       bg: 'bg-slate-100',  text: 'text-slate-600'   },
+    optimize: { label: 'Optimizar', bg: 'bg-amber-50',  text: 'text-amber-700'   },
+    pause:    { label: 'Pausar',   bg: 'bg-red-50',     text: 'text-red-700'     },
+  }[status];
+  return (
+    <span title={reason} className={cn("inline-flex px-2 py-0.5 rounded-md text-xs font-bold cursor-help", map.bg, map.text)}>
+      {map.label}
+    </span>
+  );
+}
+
+function NegativeKeywordsCopy({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <button onClick={copy} className="px-4 py-2 text-xs font-bold bg-slate-900 text-white rounded-lg hover:bg-slate-700 transition-colors">
+        {copied ? '¡Copiado!' : 'Copiar lista de negative keywords'}
+      </button>
+      <span className="text-[11px] text-slate-500">Pegá en Google Ads → Keywords → Negative keywords</span>
     </div>
   );
 }

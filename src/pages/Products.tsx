@@ -63,7 +63,13 @@ export default function Products() {
     </div>
   );
 
-  const filtered = data.routes.filter(r => r.route.toLowerCase().includes(search.toLowerCase()));
+  const filtered = data.routes
+    .filter(r => r.route.toLowerCase().includes(search.toLowerCase()))
+    .sort((a, b) => {
+      // Default: por revenue desc; pero priorizamos rutas con ROAS bajo (rentabilidad mala) ARRIBA
+      // para que sean visibles. Mejor: ordenar por revenue desc igual.
+      return b.revenue - a.revenue;
+    });
 
   return (
     <div className="py-12 max-w-7xl mx-auto space-y-10 relative z-10">
@@ -168,8 +174,8 @@ export default function Products() {
                       <div className="font-semibold text-slate-900">{formatCurrency(route.revenue)}</div>
                       <Delta value={route.revenueDelta} />
                     </td>
-                    <td className="px-5 py-4 text-right tabular-nums text-slate-600">
-                      {route.roas.toFixed(2)}x
+                    <td className="px-5 py-4 text-right tabular-nums">
+                      <RoasBadge roas={route.roas} />
                     </td>
                     <td className="px-5 py-4 text-right tabular-nums text-slate-600">
                       {route.cpa > 0 ? formatCurrency(route.cpa) : '—'}
@@ -192,6 +198,20 @@ export default function Products() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function RoasBadge({ roas }: { roas: number }) {
+  if (roas === 0) return <span className="text-slate-300 text-xs">—</span>;
+  const colors = roas >= 3
+    ? 'bg-emerald-50 text-emerald-700'
+    : roas >= 1.5
+      ? 'bg-amber-50 text-amber-700'
+      : 'bg-orange-50 text-orange-700';
+  return (
+    <span className={cn("inline-flex px-2 py-0.5 rounded-md text-xs font-bold tabular-nums", colors)}>
+      {roas.toFixed(2)}x
+    </span>
   );
 }
 

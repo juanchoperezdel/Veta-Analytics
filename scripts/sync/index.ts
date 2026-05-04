@@ -503,6 +503,108 @@ async function syncMetaBreakdowns(clientId: string, adAccountId: string, accessT
   }
 }
 
+// ─── Meta — Hourly (estacionalidad por hora del día) ────────────────────────
+
+async function syncMetaHourly(clientId: string, adAccountId: string, accessToken: string) {
+  const { since, until } = dateRange(14);  // 14 días de hourly: suficiente para patrones, no explota volumen
+  const fields = ['date_start', 'spend', 'impressions', 'clicks', 'actions', 'action_values'].join(',');
+
+  const url = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
+    `level=account&time_increment=1` +
+    `&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone` +
+    `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
+    `&fields=${fields}&access_token=${accessToken}&limit=500`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Meta hourly API error: ${res.status} ${await res.text()}`);
+  const body = await res.json();
+  const data: any[] = body.data ?? [];
+
+  for (const row of data) {
+    // hourly_stats viene como "00:00:00 - 00:59:59"
+    const hourStr = row.hourly_stats_aggregated_by_advertiser_time_zone ?? '00:00:00';
+    const hour = parseInt(String(hourStr).slice(0, 2));
+    const spend = parseFloat(row.spend ?? '0');
+    const impressions = parseInt(row.impressions ?? '0');
+    const clicks = parseInt(row.clicks ?? '0');
+    const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
+    const revenue = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
+
+    await sql`
+      INSERT INTO meta_ads_hourly
+        (client_id, snapshot_date, hour, spend, impressions, clicks, purchases, revenue)
+      VALUES
+        (${clientId}, ${row.date_start}, ${hour}, ${spend}, ${impressions}, ${clicks}, ${purchases}, ${revenue})
+      ON CONFLICT (client_id, snapshot_date, hour)
+      DO UPDATE SET
+        spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
+        purchases = EXCLUDED.purchases, revenue = EXCLUDED.revenue, synced_at = NOW()
+    `;
+  }
+
+  console.log(`✓ Meta hourly synced: ${data.length} rows`);
+}
+
+// ─── Google Ads — Hourly ─────────────────────────────────────────────────────
+
+async function syncGoogleAdsHourly(clientId: string, customerId: string) {
+  const accessToken = await getGoogleAccessToken();
+
+  const query = `
+    SELECT
+      segments.date,
+      segments.hour,
+      metrics.cost_micros, metrics.impressions, metrics.clicks,
+      metrics.conversions, metrics.conversions_value
+    FROM customer
+    WHERE segments.date DURING LAST_14_DAYS
+  `;
+
+  const res = await fetch(
+    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'developer-token': process.env.GOOGLE_ADS_DEV_TOKEN!,
+        'login-customer-id': process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID!,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query }),
+    }
+  );
+
+  if (!res.ok) throw new Error(`Google Ads hourly error: ${res.status} ${await res.text()}`);
+  const batches: any[] = await res.json();
+  const results = batches.flatMap((b: any) => b.results ?? []);
+
+  // Inserts en chunks paralelos
+  for (let i = 0; i < results.length; i += 30) {
+    const chunk = results.slice(i, i + 30);
+    await Promise.all(chunk.map((row: any) => {
+      const date = row.segments.date;
+      const hour = parseInt(row.segments.hour ?? '0');
+      const spend = (row.metrics?.costMicros ?? 0) / 1_000_000;
+      const impr  = Number(row.metrics?.impressions ?? 0);
+      const clicks = Number(row.metrics?.clicks ?? 0);
+      const conv  = parseFloat(row.metrics?.conversions ?? '0');
+      const cv    = parseFloat(row.metrics?.conversionsValue ?? '0');
+      return sql`
+        INSERT INTO google_ads_hourly
+          (client_id, snapshot_date, hour, spend, impressions, clicks, conversions, conv_value)
+        VALUES
+          (${clientId}, ${date}, ${hour}, ${spend}, ${impr}, ${clicks}, ${conv}, ${cv})
+        ON CONFLICT (client_id, snapshot_date, hour)
+        DO UPDATE SET
+          spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
+          conversions = EXCLUDED.conversions, conv_value = EXCLUDED.conv_value, synced_at = NOW()
+      `;
+    }));
+  }
+
+  console.log(`✓ Google Ads hourly synced: ${results.length} rows`);
+}
+
 // ─── GA4 (KPIs + rutas) ──────────────────────────────────────────────────────
 
 async function syncGA4(clientId: string, propertyId: string) {
@@ -656,6 +758,14 @@ async function main() {
     try {
       await syncGoogleAdsSearchTerms(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
     } catch (e) { console.error(`  ✗ Google Ads Search Terms:`, e); }
+
+    try {
+      await syncMetaHourly(client.id, process.env.META_AD_ACCOUNT_ID!, process.env.META_ACCESS_TOKEN!);
+    } catch (e) { console.error(`  ✗ Meta Hourly:`, e); }
+
+    try {
+      await syncGoogleAdsHourly(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
+    } catch (e) { console.error(`  ✗ Google Ads Hourly:`, e); }
 
     // YouTube deshabilitado por ahora
     // try {

@@ -9,6 +9,9 @@ const [terms]  = await sql`SELECT COUNT(*) AS rows, COUNT(DISTINCT search_term) 
 const [creat]  = await sql`SELECT COUNT(*) AS rows, COUNT(DISTINCT ad_id) AS unique_ads, COUNT(*) FILTER (WHERE thumbnail_url IS NOT NULL) AS with_thumb FROM meta_ads_creatives`;
 const [breakd] = await sql`SELECT COUNT(*) AS rows, COUNT(DISTINCT dimension_type) AS dim_types FROM meta_ads_breakdowns`;
 const [routes] = await sql`SELECT COUNT(*) AS rows FROM product_routes`;
+const [metaH]  = await sql`SELECT COUNT(*) AS rows, MIN(snapshot_date) AS min, MAX(snapshot_date) AS max FROM meta_ads_hourly`;
+const [gAdsH]  = await sql`SELECT COUNT(*) AS rows, MIN(snapshot_date) AS min, MAX(snapshot_date) AS max FROM google_ads_hourly`;
+const [budg]   = await sql`SELECT COUNT(*) AS rows FROM client_budgets`;
 
 console.log('\n━━━ Meta Ads ━━━');
 console.log(`  ${meta.min} → ${meta.max}`);
@@ -33,6 +36,15 @@ console.log(`  ${ga4.rows} días`);
 
 console.log('\n━━━ Product Routes (GA4 e-commerce) ━━━');
 console.log(`  ${routes.rows} filas (esperado: 0 — Andesmar no trackea items)`);
+
+console.log('\n━━━ Meta Hourly ━━━');
+console.log(`  ${metaH.rows} filas (${metaH.min} → ${metaH.max})`);
+
+console.log('\n━━━ Google Ads Hourly ━━━');
+console.log(`  ${gAdsH.rows} filas (${gAdsH.min} → ${gAdsH.max})`);
+
+console.log('\n━━━ Client Budgets ━━━');
+console.log(`  ${budg.rows} budgets cargados`);
 
 console.log('\n━━━ YouTube ━━━');
 console.log(`  ${yt.rows} filas`);

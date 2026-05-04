@@ -327,5 +327,138 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  return new Response(JSON.stringify({ summary, health, alerts, wins }), { headers: corsHeaders() });
+  // ─── Detección de anomalías ───────────────────────────────────────────────
+  // Comparamos KPIs de hoy vs banda histórica de los últimos 30 días.
+  // Si hoy > +2σ o < -2σ, lo flageamos como anomalía.
+  const dailyHistory = await sql`
+    SELECT snapshot_date::text AS date,
+           COALESCE(SUM(spend), 0)::numeric    AS spend,
+           COALESCE(SUM(revenue), 0)::numeric  AS revenue,
+           COALESCE(SUM(purchases), 0)::bigint AS purchases
+    FROM (
+      SELECT snapshot_date, spend, revenue, purchases FROM meta_ads_campaigns
+      WHERE client_id = ${client.id} AND snapshot_date >= CURRENT_DATE - 30
+      UNION ALL
+      SELECT snapshot_date, spend, revenue, carts AS purchases FROM google_ads_campaigns
+      WHERE client_id = ${client.id} AND snapshot_date >= CURRENT_DATE - 30
+    ) AS x
+    GROUP BY snapshot_date
+    ORDER BY snapshot_date
+  `;
+
+  function zScoreAnomaly(values: number[], current: number, label: string, unit: string): { metric: string; today: number; mean: number; sigma: number; z: number } | null {
+    if (values.length < 7) return null;  // necesitamos al menos 1 semana
+    const mean  = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length;
+    const sigma = Math.sqrt(variance);
+    if (sigma < 0.01) return null;  // sin variabilidad, no aplicamos z-score
+    const z = (current - mean) / sigma;
+    if (Math.abs(z) < 2) return null;
+    return { metric: label + (unit ? ` (${unit})` : ''), today: current, mean, sigma, z };
+  }
+
+  const histRows = dailyHistory.slice(0, -1);  // excluimos hoy de la banda
+  const todayRow = dailyHistory[dailyHistory.length - 1];
+  const anomalies: any[] = [];
+  if (todayRow && histRows.length > 7) {
+    const histSpend     = histRows.map((r: any) => Number(r.spend));
+    const histRev       = histRows.map((r: any) => Number(r.revenue));
+    const histPurch     = histRows.map((r: any) => Number(r.purchases));
+    const todaySpend    = Number(todayRow.spend);
+    const todayRev      = Number(todayRow.revenue);
+    const todayPurch    = Number(todayRow.purchases);
+
+    const checks = [
+      zScoreAnomaly(histSpend, todaySpend, 'Inversión hoy', 'ARS'),
+      zScoreAnomaly(histRev,   todayRev,   'Revenue hoy', 'ARS'),
+      zScoreAnomaly(histPurch, todayPurch, 'Compras hoy', ''),
+    ].filter(x => x !== null);
+
+    for (const a of checks as any[]) {
+      const direction = a.z > 0 ? 'ALTA' : 'BAJA';
+      const severity: 'critical' | 'warning' = Math.abs(a.z) > 3 ? 'critical' : 'warning';
+      anomalies.push({
+        severity,
+        title: `Anomalía ${direction}: ${a.metric}`,
+        detail: `Hoy ${a.today.toLocaleString('es-AR', { maximumFractionDigits: 0 })}, promedio últimos 30d ${a.mean.toLocaleString('es-AR', { maximumFractionDigits: 0 })} (z=${a.z.toFixed(1)}σ).`,
+      });
+    }
+  }
+  // Sumamos las anomalías a la lista de alerts (al principio, son más urgentes)
+  alerts.unshift(...anomalies);
+
+  // ─── Forecast del mes ─────────────────────────────────────────────────────
+  // Proyección lineal: si llevamos X días del mes con $Y gastado/revenue,
+  // proyectamos el total a fin de mes asumiendo el mismo pace diario.
+  const today = new Date();
+  const dayOfMonth = today.getDate();
+  const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+
+  const projectedSpend   = dayOfMonth > 0 ? (cSpend   / dayOfMonth) * lastDayOfMonth : cSpend;
+  const projectedRevenue = dayOfMonth > 0 ? (cRev     / dayOfMonth) * lastDayOfMonth : cRev;
+  const projectedPurch   = dayOfMonth > 0 ? (cPurch   / dayOfMonth) * lastDayOfMonth : cPurch;
+
+  // Mes anterior completo (para comparación de la proyección)
+  const [prevMonthFull] = await sql`
+    SELECT
+      COALESCE(SUM(spend), 0)::numeric    AS spend,
+      COALESCE(SUM(revenue), 0)::numeric  AS revenue,
+      COALESCE(SUM(purchases), 0)::bigint AS purchases
+    FROM (
+      SELECT spend, revenue, purchases FROM meta_ads_campaigns
+      WHERE client_id = ${client.id}
+        AND snapshot_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+        AND snapshot_date <  DATE_TRUNC('month', CURRENT_DATE)
+      UNION ALL
+      SELECT spend, revenue, carts AS purchases FROM google_ads_campaigns
+      WHERE client_id = ${client.id}
+        AND snapshot_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 month')
+        AND snapshot_date <  DATE_TRUNC('month', CURRENT_DATE)
+    ) AS combined
+  `;
+  const pmRev   = Number(prevMonthFull?.revenue ?? 0);
+  const pmSpend = Number(prevMonthFull?.spend ?? 0);
+  const pmPurch = Number(prevMonthFull?.purchases ?? 0);
+
+  const forecast = {
+    daysIn: dayOfMonth,
+    daysTotal: lastDayOfMonth,
+    progress: dayOfMonth / lastDayOfMonth,
+    spend:     { projected: projectedSpend,   prevMonth: pmSpend, delta: delta(projectedSpend, pmSpend) },
+    revenue:   { projected: projectedRevenue, prevMonth: pmRev,   delta: delta(projectedRevenue, pmRev) },
+    purchases: { projected: Math.round(projectedPurch), prevMonth: pmPurch, delta: delta(projectedPurch, pmPurch) },
+  };
+
+  // ─── Pacing presupuestario ────────────────────────────────────────────────
+  // Si hay un budget cargado para el mes en curso, devolvemos el pacing.
+  const [budgetRow] = await sql`
+    SELECT planned_spend::numeric AS planned_spend
+    FROM client_budgets
+    WHERE client_id = ${client.id}
+      AND month = DATE_TRUNC('month', CURRENT_DATE)::date
+  `;
+  let pacing: any = null;
+  if (budgetRow) {
+    const planned = Number(budgetRow.planned_spend);
+    const monthProgress = dayOfMonth / lastDayOfMonth;     // % del mes transcurrido
+    const spendProgress = planned > 0 ? cSpend / planned : 0;  // % del budget gastado
+    const onTrackBand = 0.05;                              // ±5% considerado "on track"
+    let status: 'on_track' | 'over' | 'under';
+    if (spendProgress > monthProgress + onTrackBand) status = 'over';
+    else if (spendProgress < monthProgress - onTrackBand) status = 'under';
+    else status = 'on_track';
+
+    pacing = {
+      planned,
+      spent: cSpend,
+      monthProgress,
+      spendProgress,
+      status,
+      // Proyección: a este pace, cuánto va a gastar a fin de mes
+      projectedSpend: dayOfMonth > 0 ? (cSpend / dayOfMonth) * lastDayOfMonth : 0,
+      projectedDelta: planned > 0 && dayOfMonth > 0 ? ((cSpend / dayOfMonth) * lastDayOfMonth - planned) / planned : 0,
+    };
+  }
+
+  return new Response(JSON.stringify({ summary, health, alerts, wins, forecast, pacing }), { headers: corsHeaders() });
 };

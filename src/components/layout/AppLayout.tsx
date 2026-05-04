@@ -12,7 +12,8 @@ import {
   LineChart,
   BarChart3,
   Activity,
-  Filter
+  Filter,
+  Clock
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getClients } from '@/lib/api';
@@ -36,6 +37,7 @@ export default function AppLayout() {
     { icon: BarChart3, label: 'Evolutivo', path: 'evolutivo' },
     { icon: Map, label: 'Rutas / Destinos', path: 'products' },
     { icon: Filter, label: 'Embudo', path: 'funnel' },
+    { icon: Clock, label: 'Estacionalidad', path: 'seasonality' },
     { icon: MonitorPlay, label: 'YouTube', path: 'youtube' },
   ];
 
