@@ -60,7 +60,8 @@ export const api = {
   demographics: (slug: string, start?: string, end?: string) => apiFetch(`/demographics?slug=${slug}${rangeParams(start, end)}`),
   funnel:       (slug: string, start?: string, end?: string) => apiFetch(`/funnel?slug=${slug}${rangeParams(start, end)}`),
   competitors:  (slug: string, start?: string, end?: string) => apiFetch(`/competitors?slug=${slug}${rangeParams(start, end)}`),
-  seasonality:  (slug: string, source: 'all' | 'meta' | 'google' = 'all') => apiFetch(`/seasonality?slug=${slug}&source=${source}`),
+  seasonality:  (slug: string, source: 'all' | 'meta' | 'google' = 'all', start?: string, end?: string) =>
+    apiFetch(`/seasonality?slug=${slug}&source=${source}${rangeParams(start, end)}`),
   budgetsList:  (slug: string) => apiFetch(`/budgets?slug=${slug}`),
   budgetsSet:   (slug: string, month: string, plannedSpend: number, notes?: string) =>
     apiFetch(`/budgets?slug=${slug}`, { method: 'POST', body: JSON.stringify({ month, plannedSpend, notes }) }),
