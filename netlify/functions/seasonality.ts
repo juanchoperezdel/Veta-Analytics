@@ -187,11 +187,18 @@ export default async (req: Request, _context: Context) => {
       : { phase: label, spend: 0, revenue: 0, purchases: 0, roas: 0, sampleSize: 0 };
   });
 
-  // ─── Best/worst rankings con filtros de tamaño de muestra ───────────────
-  const goodDows = dows.filter(d => d.sampleSize >= 3 && d.spend > 0);
+  // ─── Best/worst rankings con filtros de tamaño de muestra dinámico ──────
+  // Si el rango es chico (ej: 1 mes), cada día del mes solo aparece 1 vez,
+  // así que no podemos exigir sampleSize >= 2. Si el rango es amplio (>2 meses),
+  // exigimos al menos 2 muestras por bucket para evitar outliers.
+  const totalDays = dailyRows.length;
+  const minDowSamples = totalDays >= 60 ? 3 : totalDays >= 30 ? 2 : 1;
+  const minDomSamples = totalDays >= 90 ? 2 : 1;
+
+  const goodDows = dows.filter(d => d.sampleSize >= minDowSamples && d.spend > 0);
   const bestDow  = [...goodDows].sort((a, b) => b.roas - a.roas)[0] ?? null;
   const worstDow = [...goodDows].sort((a, b) => a.roas - b.roas)[0] ?? null;
-  const goodDoms = daysOfMonth.filter(d => d.sampleSize >= 2 && d.spend > 0);
+  const goodDoms = daysOfMonth.filter(d => d.sampleSize >= minDomSamples && d.spend > 0);
   const bestDom  = [...goodDoms].sort((a, b) => b.revenue - a.revenue)[0] ?? null;
   const worstDom = [...goodDoms].sort((a, b) => a.revenue - b.revenue)[0] ?? null;
   const bestPhase = [...phases].filter(p => p.spend > 0).sort((a, b) => b.roas - a.roas)[0] ?? null;

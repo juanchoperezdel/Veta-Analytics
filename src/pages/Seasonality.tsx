@@ -271,22 +271,30 @@ function DayCard({ title, subtitle, day, tone, icon }: {
   );
 }
 
-function DayOfMonthChart({ days }: { days: DomAgg[] }) {
-  if (days.length === 0) return <div className="text-sm text-slate-400 py-8 text-center">Sin datos en este rango.</div>;
-  const maxRevenue = Math.max(...days.map(d => d.revenue), 1);
+function DayOfMonthChart({ days }: { days: DomAgg[] | undefined }) {
+  if (!days || days.length === 0) {
+    return <div className="text-sm text-slate-400 py-8 text-center">Sin datos en este rango. Esperá 1-2 minutos y refrescá si recién desplegaste.</div>;
+  }
+  const totalRevenue = days.reduce((s, d) => s + (Number(d.revenue) || 0), 0);
+  if (totalRevenue === 0) {
+    return <div className="text-sm text-slate-400 py-8 text-center">No hay revenue registrado para los días en este rango.</div>;
+  }
+  const maxRevenue = Math.max(...days.map(d => Number(d.revenue) || 0), 1);
   // Grid de 31 días — días sin datos quedan vacíos
-  const dayMap = new Map(days.map(d => [d.day, d]));
+  const dayMap = new Map(days.map(d => [Number(d.day), d]));
   return (
     <div>
       <div className="flex items-end gap-px h-40">
         {Array.from({ length: 31 }, (_, i) => i + 1).map(day => {
           const d = dayMap.get(day);
-          if (!d || d.revenue === 0) {
+          const dayRevenue = d ? Number(d.revenue) || 0 : 0;
+          if (!d || dayRevenue === 0) {
             return <div key={day} className="flex-1 h-1 bg-slate-100 rounded-sm" title={`Día ${day} · sin datos`} />;
           }
-          const heightPct = (d.revenue / maxRevenue) * 100;
-          const colorClass = d.roas >= 3 ? 'bg-emerald-500' : d.roas >= 1.5 ? 'bg-amber-500' : 'bg-orange-500';
-          const tooltip = `Día ${day}\nIngresos: ${formatCurrency(d.revenue)}\nInvertido: ${formatCurrency(d.spend)}\nPor cada $1 → $${d.roas.toFixed(2)}\n${d.sampleSize} muestras`;
+          const heightPct = (dayRevenue / maxRevenue) * 100;
+          const roas = Number(d.roas) || 0;
+          const colorClass = roas >= 3 ? 'bg-emerald-500' : roas >= 1.5 ? 'bg-amber-500' : 'bg-orange-500';
+          const tooltip = `Día ${day}\nIngresos: ${formatCurrency(dayRevenue)}\nInvertido: ${formatCurrency(Number(d.spend) || 0)}\nPor cada $1 → $${roas.toFixed(2)}\n${d.sampleSize} muestras`;
           return (
             <div key={day} title={tooltip} className="flex-1 flex flex-col items-center justify-end cursor-help group">
               <div
