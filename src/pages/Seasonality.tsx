@@ -321,13 +321,14 @@ function DayOfMonthChart({ days }: { days: DomAgg[] | undefined }) {
           const roas = Number(d.roas) || 0;
           const colorClass = roas >= 3 ? 'bg-emerald-500' : roas >= 1.5 ? 'bg-amber-500' : 'bg-orange-500';
           const tooltip = `Día ${day}\nIngresos: ${formatCurrency(dayRevenue)}\nInvertido: ${formatCurrency(Number(d.spend) || 0)}\nPor cada $1 → $${roas.toFixed(2)}\n${d.sampleSize} muestras`;
+          // La barra es hija directa del flex container (h-40) para que % funcione
           return (
-            <div key={day} title={tooltip} className="flex-1 flex flex-col items-center justify-end cursor-help group">
-              <div
-                className={cn("w-full rounded-sm transition-all duration-300 group-hover:opacity-80", colorClass)}
-                style={{ height: `${Math.max(2, heightPct)}%` }}
-              />
-            </div>
+            <div
+              key={day}
+              title={tooltip}
+              className={cn("flex-1 rounded-sm transition-all duration-300 hover:opacity-80 cursor-help", colorClass)}
+              style={{ height: `${Math.max(2, heightPct)}%` }}
+            />
           );
         })}
       </div>
