@@ -40,6 +40,7 @@ export default function Seasonality() {
   const { clientSlug } = useParams();
   const [data, setData] = useState<SeasonalityData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<Source>('all');
   const [range, setRange] = useState<DateRange>(defaultRange());
 
@@ -49,12 +50,36 @@ export default function Seasonality() {
   useEffect(() => {
     if (!clientSlug) return;
     setLoading(true);
+    setError(null);
     api.seasonality(clientSlug, source, range.start, range.end)
-      .then(d => setData(d))
+      .then(d => {
+        if (d?.error) {
+          setError(`Backend dijo: ${d.error}`);
+          setData(null);
+        } else {
+          setData(d);
+        }
+      })
+      .catch(err => {
+        setError(err?.message ?? String(err));
+        setData(null);
+      })
       .finally(() => setLoading(false));
   }, [clientSlug, source, range]);
 
-  if (loading) return <div className="p-8 text-slate-400 animate-pulse">Cargando estacionalidad...</div>;
+  if (loading) return <div className="p-8 text-slate-400 animate-pulse">Cargando estacionalidad ({range.label}, {SOURCE_LABELS[source]})...</div>;
+  if (error) return (
+    <div className="py-12 max-w-7xl mx-auto space-y-4">
+      <div className="border-b border-slate-200 pb-6">
+        <span className="text-sm text-slate-500">{currentClient.name} / Estacionalidad</span>
+      </div>
+      <div className="p-6 bg-red-50 border border-red-200 rounded-xl">
+        <div className="font-bold text-red-900">Error al cargar la data</div>
+        <div className="text-sm text-red-700 mt-1 font-mono">{error}</div>
+        <div className="text-xs text-slate-600 mt-3">Probá refrescar (Ctrl+Shift+R) o cambiar el rango. Si persiste, abrí DevTools → Network → mirá el response.</div>
+      </div>
+    </div>
+  );
   if (!data) return <div className="p-8 text-slate-500">Sin datos.</div>;
 
   // Heat-map matriz 7×24
