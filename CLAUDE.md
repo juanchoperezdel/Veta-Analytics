@@ -1,15 +1,20 @@
 # Veta Analytics — Memoria del Proyecto
 
-Dashboard de analytics multi-cliente que combina data de Meta Ads, Google Ads
-y GA4 en una sola vista, con comparativas vs mismo período del mes anterior.
+Hub de inteligencia de pauta digital multi-cliente que combina Meta Ads,
+Google Ads y GA4 en una sola vista. Convierte data en **decisiones concretas**
+para el dueño/CEO: qué escalar, qué pausar, dónde mover budget, qué requiere
+atención hoy.
+
+Para el plan por features y status detallado ver [`ROADMAP.md`](./ROADMAP.md).
 
 ## Stack
 
-- **Frontend**: React 19 + Vite + TypeScript + Tailwind CSS + Recharts
+- **Frontend**: React 19 + Vite + TypeScript + Tailwind CSS + Recharts + react-router 7
 - **Backend**: Netlify Functions (`netlify/functions/*.ts`) — serverless
-- **DB**: Neon PostgreSQL (serverless, región `sa-east-1`)
+- **DB**: Neon PostgreSQL (serverless)
 - **Auth**: JWT manual (`jose`) + hash SHA-256 de passwords. Tabla `users` + `user_clients`
 - **Sync de data**: GitHub Actions cron `0 * * * *` (cada hora)
+- **Email**: Resend API (resumen semanal automático)
 - **Deploy**: Netlify conectado al repo `juanchoperezdel/Veta-Analytics`
 - **Repo**: https://github.com/juanchoperezdel/Veta-Analytics (público)
 
@@ -18,102 +23,166 @@ y GA4 en una sola vista, con comparativas vs mismo período del mes anterior.
 ```
 GitHub Actions (cron 1h)
   └── scripts/sync/index.ts
-        ├── Meta Marketing API v21  (por cliente, daily rows)
-        ├── Google Ads API v20       (searchStream, service account)
-        └── GA4 Data API v1beta      (refresh_token OAuth)
-              │
-              ▼
-       Neon PostgreSQL
-              │
-              ▼
-    Netlify (frontend + functions)
-      ├── /.netlify/functions/login
-      ├── /.netlify/functions/dashboard
-      ├── /.netlify/functions/google-ads
-      ├── /.netlify/functions/meta-ads
-      ├── /.netlify/functions/products
-      └── /.netlify/functions/youtube   (deshabilitado por ahora)
-              │
-              ▼
-         React SPA (JWT en localStorage)
+        ├── Meta Marketing API v21
+        │   ├── syncMetaAds         (campaigns daily, level=campaign)
+        │   ├── syncMetaCreatives   (level=ad, top 60 por spend, 7d, thumbnails)
+        │   ├── syncMetaBreakdowns  (age/gender/region/publisher_platform, 30d)
+        │   └── syncMetaHourly      (account level con hourly_stats, 14d)
+        ├── Google Ads API v20 (service account JWT)
+        │   ├── syncGoogleAds         (campaign level daily, 30d)
+        │   ├── syncGoogleAdsSearchTerms (search_term_view, 30d con concurrency)
+        │   └── syncGoogleAdsHourly   (customer level + segments.hour, 14d)
+        └── GA4 Data API v1beta (refresh_token OAuth — actualmente expirado)
+              └── syncGA4: business_kpis + product_routes (vacío para Andesmar)
+
+GitHub Actions (cron lunes 12:00 UTC = 9am ART)
+  └── scripts/weekly-report.ts → Resend → email a usuarios autorizados
+
+Neon PostgreSQL
+  └── 12 tablas (ver "Schema de Neon")
+
+Netlify (frontend + 16 functions)
+  └── React SPA (JWT en localStorage)
 ```
 
 ## Schema de Neon
 
-Tablas principales (`scripts/db/schema.sql`):
+Tablas (`scripts/db/schema.sql`, 25 statements al aplicarlo):
 
-- `clients` — un row por cliente (slug, name)
-- `users` + `user_clients` — auth manual + autorización por slug
+**Auth y multi-tenant**
+- `users` — id, email, password_hash
+- `clients` — id, slug, name, logo_initial
+- `user_clients` — user_id × client_id (autorización por slug)
+
+**Campañas y agregados**
 - `business_kpis` — KPIs diarios de GA4 (users, sessions, revenue, etc.)
-- `google_ads_campaigns` — un row por (client, date, campaign_id)
-- `meta_ads_campaigns` — un row por (client, date, campaign_id)
-- `product_routes` — un row por (client, date, route) — e-commerce
-- `youtube_videos` — un row por (client, date, video_id)
+- `google_ads_campaigns` — un row por (client, date, campaign_id), incluye columna `route`
+- `google_ads_kpis` — agregados diarios con deltas (legacy, preserved)
+- `meta_ads_campaigns` — un row por (client, date, campaign_id), incluye `effective_status`, `route`, `type` (objective)
+- `meta_ads_kpis` — agregados diarios con deltas (legacy, preserved)
+- `product_routes` — rutas de e-commerce GA4 (vacío para Andesmar)
+
+**Inteligencia adicional (agregadas en mayo 2026)**
+- `google_ads_search_terms` — queries reales con `route` parseado, ~21K filas para Andesmar
+- `meta_ads_creatives` — ad-level con `thumbnail_url`, `effective_status`, métricas (rolling 7d)
+- `meta_ads_breakdowns` — dimension_type (age/gender/region/publisher_platform) × dimension_value
+- `meta_ads_hourly` — spend/revenue/purchases por (date, hour 0-23)
+- `google_ads_hourly` — spend/revenue/conversions por (date, hour 0-23)
+- `client_budgets` — budget mensual por cliente (form en Pulso)
+- `youtube_videos` — pausado (sync comentado)
 
 Todas tienen `ON CONFLICT ... DO UPDATE` para upserts idempotentes.
 
+## Pestañas del dashboard
+
+Sidebar (`src/components/layout/AppLayout.tsx`):
+
+1. **Pulso** (default) — semáforos de salud + alertas auto + wins + forecast del mes + pacing presupuestario + anomaly detection (z-score)
+2. **Dashboard** — KPIs hero + donut canales (preservado del original)
+3. **Google Ads** — KPIs + spend en queries de competidores + negative keywords accionables + tabla campañas con health score
+4. **Meta Ads** — KPIs + galería de creatives con thumbnails + heat-maps demográficos + recomendaciones de redistribución (mismatch)
+5. **Evolutivo** — line chart YoY mensual + tabla histórica
+6. **Rutas / Destinos** — sparklines, top movers, oportunidades, mix de canal, ROAS visible con semáforo
+7. **Embudo** — Usuarios → Sesiones → Carritos → Compras (depende de business_kpis = GA4)
+8. **Estacionalidad** — heat-map día×hora + por día del mes + por fase del mes (Principio/Mitad/Fin) + por día semana, con DateRangePicker y selector Meta/Google/All
+9. **YouTube** — preservada pero con sync deshabilitado
+
+## Parser de rutas (`scripts/sync/parse-routes.ts`)
+
+Andesmar **no tiene e-commerce tracking en GA4** — `product_routes` está
+vacía. Por eso las rutas se infieren del **nombre de campaña** (Meta + Google)
+y de **search terms** de Google Ads.
+
+Mapeo de tokens → destino canónico:
+- `MZA, mendoza` → Mendoza
+- `SJ, sanjuan, san juan` → San Juan
+- `BA, bsas` → Buenos Aires
+- `cba, cordoba` → Córdoba
+- `salta, jujuy, tucuman, neuquen, bariloche, corrientes, rosario, retiro` → su nombre
+- `noa, nea, patagonia, centro, sur, nacionales` → región
+- `cl, chile` → Chile
+- `santiagodechile` → Santiago de Chile
+
+Si encuentra 2+ destinos en el mismo string → ruta origen-destino con `↔`
+(ej: `VETA_Conversion_Advantage_MZA_SJ` → `Mendoza ↔ San Juan`).
+
+Stopwords filtran palabras comunes de campaign names (VETA, Conversion,
+Advantage, AlwaysOn, Estudiantes, Bancos, etc.).
+
+Después de cualquier cambio al parser, correr `scripts/backfill-routes.ts`
+para repoblar `route` en filas históricas.
+
+## Estado actual de la data (mayo 2026)
+
+- **Meta Ads**: ~4000 filas (oct 2024 → hoy), 1446 con ruta parseada
+- **Google Ads**: ~8200 filas (oct 2024 → hoy), 3153 con ruta parseada
+- **Search Terms**: ~21K queries únicas, ~10K con ruta parseada
+- **Meta Creatives**: 842 filas, 141 ads únicos, 500 con thumbnail
+- **Meta Breakdowns**: 1115 filas (age/gender/region/placement)
+- **Meta Hourly**: 356 filas (14 días)
+- **Google Ads Hourly**: 325 filas (14 días)
+- **GA4 KPIs**: 211 días (sept 2025 → 21 abril 2026, congelado por token expirado)
+- **product_routes**: 0 filas (Andesmar no trackea items)
+- **YouTube**: 165 filas (sync pausado)
+
+Top rutas detectadas (últimos 30d): Mendoza, Nacionales, Mendoza↔Chile,
+Mendoza↔San Juan, NOA↔Patagonia, San Juan, Patagonia.
+
 ## Autenticación de APIs
 
-- **Meta Ads**: System User token (larga duración) en `META_ACCESS_TOKEN`
-- **Google Ads**: Service account JWT (scope `adwords`) usando `jose` para
-  firmar el JWT RS256 y cambiarlo por access token. El service account está
-  en `GOOGLE_ADS_SERVICE_ACCOUNT_JSON` (una sola línea con `\n` escapados).
-  MCC en `GOOGLE_ADS_LOGIN_CUSTOMER_ID`.
-- **GA4**: `authorized_user` refresh_token OAuth en `GA4_SERVICE_ACCOUNT_JSON`
-
-Los archivos originales de credenciales están en
-`Paid Media Strategist Company/Jsons/` (el vetadashboard, proyecto hermano).
+- **Meta Ads**: System User token (larga duración) en `META_ACCESS_TOKEN`. Rate limits agresivos en `level=ad` con +500 ads — por eso syncMetaCreatives limita a top 60 por spend y rolling 7d.
+- **Google Ads**: Service account JWT (`google-ads-mcp@protean-genius-489017-j9.iam.gserviceaccount.com`, scope `adwords`). MCC en `GOOGLE_ADS_LOGIN_CUSTOMER_ID`.
+- **GA4**: `authorized_user` refresh_token OAuth (NO es service account, a pesar del nombre `GA4_SERVICE_ACCOUNT_JSON`). **Expira cada 7 días** porque el OAuth consent screen está en modo "Testing". Solución pendiente: publicar OAuth en Production O conseguir acceso admin a GA4 de Andesmar para migrar a service account real.
 
 ## Variables de entorno
 
-Local: `.env` en la raíz (gitignoreado). Production: GitHub Secrets +
-Netlify env vars. Lista:
-
 ```
 DATABASE_URL
+JWT_SECRET                        # firma de tokens — MISMO valor en local y prod
 META_ACCESS_TOKEN
 META_AD_ACCOUNT_ID
 GOOGLE_ADS_DEV_TOKEN
 GOOGLE_ADS_CUSTOMER_ID
 GOOGLE_ADS_LOGIN_CUSTOMER_ID
-GOOGLE_ADS_SERVICE_ACCOUNT_JSON    # JWT service account (scope adwords)
+GOOGLE_ADS_SERVICE_ACCOUNT_JSON   # JWT service account (scope adwords)
 GA4_PROPERTY_ID
-GA4_SERVICE_ACCOUNT_JSON           # authorized_user con refresh_token
+GA4_SERVICE_ACCOUNT_JSON          # OAuth refresh_token (mal nombre, no es SA)
+RESEND_API_KEY                    # opcional, para weekly report — pendiente cargar
+REPORT_FROM_EMAIL                 # opcional, default usa onboarding@resend.dev
 ```
-
-Variables obsoletas (ya no se usan, se pueden borrar de GH Secrets):
-`GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `GOOGLE_ADS_REFRESH_TOKEN`.
 
 ## Filtros de fecha y comparativas
 
-`DateRangePicker` (`src/components/ui/DateRangePicker.tsx`) tiene:
+`DateRangePicker` (`src/components/ui/DateRangePicker.tsx`):
 - Presets: **Este mes hasta la fecha** (default), Mes pasado, Últimos 7/30 días
-- Rango personalizado con inputs de día (selección libre)
+- Rango personalizado con inputs de día
 
 **Todas las comparativas (deltas) son vs el mismo rango de fechas pero un mes
-atrás** (`snapshot_date - INTERVAL '1 month'`). Ej: si miramos 1-20 abril, se
-compara contra 1-20 marzo. Decisión deliberada del usuario, aplicada en los 5
-Netlify functions.
+atrás** (`snapshot_date - INTERVAL '1 month'`). Decisión deliberada del
+usuario, aplicada en todos los endpoints.
+
+Excepción: la pestaña **Estacionalidad** acepta cualquier rango y compara
+contra distribuciones (no vs período anterior). El heat-map día×hora
+**siempre** muestra últimos 14 días (limitación de tablas hourly).
 
 ## Clientes configurados
 
-- **Andesmar** — único cliente activo.
+- **Andesmar** (slug `andesmar`) — único cliente activo, empresa de pasajes de bus argentina
   - Meta ad account: `160070906181703`
   - Google Ads customer: `3945728157` (bajo MCC `5971963548`)
   - GA4 property: `488976699`
 
-Para agregar más clientes: insertar row en `clients` + credenciales
-específicas en la tabla (ver "Próximos pasos").
+Para multi-cliente real (próximo paso): extender tabla `clients` con
+columnas `meta_ad_account_id`, `google_ads_customer_id`, `ga4_property_id` y
+leerlas por cliente en el sync en vez de env vars globales.
 
-## Estado actual de la data
+## Lista de competidores conocidos (Andesmar)
 
-Verificado el 2026-04-20 con `scripts/check-data.ts`:
+Hardcoded en `netlify/functions/competitors.ts`:
+Flecha Bus, BusPlus, Cata Internacional, Vía Bariloche, Crucero del Norte,
+General Urquiza, El Rápido, Plataforma 10, Omnilíneas, Plusmar.
 
-- **Meta Ads**: oct 2024 → hoy — 3885 filas, 567 días ✓
-- **Google Ads**: oct 2024 → hoy — 8017 filas, 558 días ✓
-- **GA4 KPIs**: sept 2025 → hoy — solo 210 días (límite de retención de GA4)
-- **GA4 rutas (productos)**: 0 filas — Andesmar no tiene e-commerce tracking
-- **YouTube**: 168 filas — pausado, re-habilitar después
+Cuando se agreguen más clientes, mover esto a una tabla `client_competitors`.
 
 ## Scripts útiles
 
@@ -121,53 +190,81 @@ Verificado el 2026-04-20 con `scripts/check-data.ts`:
 # Sync normal (lo que corre en GH Actions cada hora)
 npx dotenv-cli -e .env -- npx tsx scripts/sync/index.ts
 
-# Backfill histórico (one-off)
-npx dotenv-cli -e .env -- npx tsx scripts/sync/backfill.ts
-# O con rango custom:
-npx dotenv-cli -e .env -- npx tsx scripts/sync/backfill.ts 2024-01-01 2024-12-31
+# Aplicar schema (idempotente, usa CREATE IF NOT EXISTS)
+npx dotenv-cli -e .env -- npx tsx scripts/apply-schema.ts
 
-# Ver estado de la data
+# Backfill de ruta histórica después de cambios al parser
+npx dotenv-cli -e .env -- npx tsx scripts/backfill-routes.ts
+
+# Sync solo de creatives de Meta (caso de rate limit en sync regular)
+npx dotenv-cli -e .env -- npx tsx scripts/sync-creatives-only.ts
+
+# Discovery: investigar fuentes de data nuevas
+npx dotenv-cli -e .env -- npx tsx scripts/discover-routes.ts
+
+# Estado de la data
 npx dotenv-cli -e .env -- npx tsx scripts/check-data.ts
 
 # Crear usuario
 npx dotenv-cli -e .env -- npx tsx scripts/create-user.ts email password slug1,slug2
 
+# Backfill histórico de campañas (one-off)
+npx dotenv-cli -e .env -- npx tsx scripts/sync/backfill.ts [start] [end]
+
+# Resumen semanal por email (manual)
+npx dotenv-cli -e .env -- npx tsx scripts/weekly-report.ts
+
 # Dev server
-npm run dev
+npm run dev                       # Vite en :3000
+npx netlify dev --port 8888 --target-port 3000  # Vite + Functions juntos
 ```
 
 ## Decisiones clave
 
-- **Auth manual sobre Clerk**: para un dashboard con pocos usuarios (1-10),
-  agregar Clerk era overhead innecesario. JWT en localStorage + SHA-256 basta.
-- **Netlify Functions sobre Vercel**: elección del usuario por preferencia
-  previa con Netlify.
-- **Data diaria vs agregada**: el schema guarda una fila por día para poder
-  filtrar cualquier rango arbitrario. Las agregaciones se hacen en SQL al
-  servir, no al sincronizar.
-- **Service account para Google Ads**: el refresh_token de
-  `ga_mcp_credentials.json` solo tenía scope de Analytics, no de `adwords`. El
-  service account `google-ads-mcp@protean-genius-489017-j9` ya estaba agregado
-  como MCC user, así que se usa ese.
-- **Backfill paginado por meses**: Meta API devuelve 500 si pedís un rango
-  muy largo de datos diarios. Dividirlo mes a mes evita timeouts.
+- **Auth manual sobre Clerk**: dashboard con pocos usuarios (1-10), Clerk era overhead innecesario.
+- **Netlify Functions sobre Vercel**: preferencia previa del usuario.
+- **Data diaria vs agregada**: schema guarda una fila por día para poder filtrar cualquier rango. Agregaciones se hacen en SQL al servir.
+- **Service account para Google Ads**: el refresh_token de `ga_mcp_credentials.json` solo tenía scope Analytics, no `adwords`. El SA `google-ads-mcp` ya estaba como MCC user.
+- **Backfill paginado por meses**: Meta API tira 500 si se piden rangos largos.
+- **Sumar pestañas, no consolidar**: cuando se agregan features nuevas (Pulso, Funnel, Estacionalidad), van como pestañas adicionales sin tocar las existentes.
+- **Lenguaje simple en UI**: "Por cada $1 invertido recuperaste $X" en vez de "ROAS Xx". El dashboard es para el dueño del negocio, no para el media buyer técnico.
+- **Filtro anti-outliers en Estacionalidad**: best/worst slot solo considera celdas con spend ≥ mediana × 0.5. Sin esto, un slot con $14K spend y $2.2M revenue (1 compra grande random) salía como "ROAS 154x" y no era predictivo.
+- **Health score por reglas vs ML**: thresholds simples sobre ROAS / CPA / días sin conversión. Suficientemente útil sin overhead.
+- **GA4 resiliente**: el sync de GA4 está en try/catch independiente, su falla NO frena el resto del sync (Meta + Google + breakdowns + hourly siguen).
 
-## Próximos pasos
+## Próximos pasos (ver ROADMAP.md para detalle)
 
-- [ ] Agregar más clientes (Datte.me, GBOL, Sur France Citroen, etc.).
-      Para esto hay que extender la tabla `clients` con columnas
-      `meta_ad_account_id`, `google_ads_customer_id`, `ga4_property_id` y
-      leer esos valores por cliente en el sync en vez de env vars globales.
-- [ ] Re-habilitar YouTube (el usuario va a definir cómo)
-- [ ] Re-chequear el tema de retención GA4: ver si se puede cambiar el setting
-      de 2 a 14 meses en Analytics Admin → Data Retention
-- [ ] Posibles features futuros: charts temporales, export a CSV, alertas por
-      email cuando CPA/ROAS cae fuera de umbrales
+### Setup pendiente del usuario
+- [ ] Configurar `RESEND_API_KEY` en GitHub Secrets para activar email semanal
+- [ ] Cargar budget mensual desde Pulso para activar pacing
+- [ ] Resolver GA4 token (publicar OAuth en Production O migrar a service account)
+
+### Tier 3 backlog
+- [ ] Cohort / LTV por canal de adquisición
+- [ ] Análisis de landing pages (necesita GA4 OK)
+- [ ] Multi-touch attribution
+- [ ] Frequency capping insights
+- [ ] Auction insights (Google Ads impression share)
+- [ ] Anotaciones / comentarios sobre eventos
+- [ ] Multi-cliente real (Datte.me, GBOL, Sur France Citroen)
+- [ ] Reactivar YouTube
+- [ ] Dayparting automático sugerido (basado en Estacionalidad)
+
+### Mejoras menores
+- [ ] Export a CSV/PDF
+- [ ] Mobile-friendly
+- [ ] Dark mode
+- [ ] Comparador de períodos custom (no solo vs mes pasado)
 
 ## Sesiones previas relevantes
 
-El dashboard original con mock data fue clonado de
-`juanchoperezdel/Veta-Analytics`. Las credenciales y configuración de
-clientes vienen del proyecto hermano **vetadashboard**
-(`Paid Media Strategist Company/dashboard/`), que tiene un patrón similar de
-sync pero con Next.js y scope más amplio (17 clientes).
+El dashboard original (mock data) fue clonado del template del repo. El sync
+real se construyó copiando patrones de **vetadashboard**
+(`Paid Media Strategist Company/dashboard/`, Next.js, 17 clientes).
+
+Mayo 2026: refactor mayor que pasó el dashboard de "vista de KPIs" a "hub de
+inteligencia con decisiones sugeridas":
+- Tier 1: análisis de competencia, forecast, health score, negative keywords
+  accionables, ROAS por destino, pacing presupuestario
+- Tier 2: estacionalidad (día/hora/día del mes/fase del mes), anomaly
+  detection, demographic mismatch, resumen semanal por email
