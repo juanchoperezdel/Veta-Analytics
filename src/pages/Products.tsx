@@ -1,6 +1,6 @@
 import { useParams } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { ArrowUpRight, ArrowDownRight, Search, TrendingUp, TrendingDown, Lightbulb } from 'lucide-react';
+import { ArrowUpRight, ArrowDownRight, Search, TrendingUp, TrendingDown, Lightbulb, Brain, Activity, Sparkles, Scale, Compass, AlertTriangle } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
 import { Card } from '@/components/ui/Card';
@@ -24,11 +24,24 @@ type Route = {
   sparkline: { date: string; spend: number }[];
 };
 
+type Conclusion = {
+  id: string;
+  category: 'yoy' | 'mom' | 'momentum' | 'forecast' | 'efficiency' | 'demand';
+  severity: 'success' | 'warning' | 'info' | 'critical';
+  route: string;
+  headline: string;
+  detail: string;
+  recommendation: string;
+  confidence: 'alta' | 'media' | 'baja';
+  metric?: { label: string; value: string };
+};
+
 type ProductsData = {
   routes: Route[];
   topGainers: Route[];
   topLosers: Route[];
   opportunities: (Route & { opportunityScore: number })[];
+  conclusions?: Conclusion[];
 };
 
 export default function Products() {
@@ -82,6 +95,11 @@ export default function Products() {
         </div>
         <DateRangePicker value={range} onChange={setRange} />
       </div>
+
+      {/* Conclusiones estratégicas — auto-generadas */}
+      {data.conclusions && data.conclusions.length > 0 && (
+        <ConclusionsSection conclusions={data.conclusions} />
+      )}
 
       {/* Movers + Opportunities */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -198,6 +216,108 @@ export default function Products() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function ConclusionsSection({ conclusions }: { conclusions: Conclusion[] }) {
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="bg-violet-100 text-violet-700 p-2 rounded-lg">
+          <Brain size={18} strokeWidth={2.5} />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">Conclusiones estratégicas</h2>
+          <p className="text-xs text-slate-500 font-medium">
+            Lo que los números están diciendo · auto-generado
+          </p>
+        </div>
+        <span className="ml-auto text-[10px] font-medium text-slate-400">
+          {conclusions.length} hallazgo{conclusions.length === 1 ? '' : 's'}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {conclusions.map(c => <ConclusionCard key={c.id} conclusion={c} />)}
+      </div>
+    </section>
+  );
+}
+
+function ConclusionCard({ conclusion }: { conclusion: Conclusion; key?: any }) {
+  const styles = {
+    success:  { bg: 'bg-emerald-50/40 border-emerald-200', iconBg: 'bg-emerald-100 text-emerald-700', accent: 'text-emerald-700' },
+    warning:  { bg: 'bg-amber-50/40 border-amber-200',     iconBg: 'bg-amber-100 text-amber-700',     accent: 'text-amber-700'   },
+    info:     { bg: 'bg-blue-50/40 border-blue-200',       iconBg: 'bg-blue-100 text-blue-700',       accent: 'text-blue-700'    },
+    critical: { bg: 'bg-red-50/40 border-red-200',         iconBg: 'bg-red-100 text-red-700',         accent: 'text-red-700'     },
+  }[conclusion.severity];
+
+  // Icon según category
+  const Icon = {
+    yoy:        TrendingUp,
+    mom:        TrendingUp,
+    momentum:   conclusion.severity === 'critical' ? TrendingDown : Activity,
+    forecast:   Sparkles,
+    efficiency: Scale,
+    demand:     Compass,
+  }[conclusion.category] ?? Lightbulb;
+
+  // Etiqueta human-readable de la categoría
+  const categoryLabel = {
+    yoy:        'Año a año',
+    mom:        'Mes a mes',
+    momentum:   'Tendencia',
+    forecast:   'Próximo mes',
+    efficiency: 'Eficiencia',
+    demand:     'Demanda',
+  }[conclusion.category];
+
+  // Confianza visual
+  const confidenceLabel = {
+    alta:  { label: 'Alta confianza',  color: 'text-emerald-600' },
+    media: { label: 'Media confianza', color: 'text-amber-600'   },
+    baja:  { label: 'Baja confianza',  color: 'text-orange-600'  },
+  }[conclusion.confidence];
+
+  return (
+    <Card className={cn("p-5 flex flex-col", styles.bg)}>
+      {/* Header: icon + tag de categoría */}
+      <div className="flex items-center gap-2 mb-3">
+        <div className={cn("p-1.5 rounded-lg shrink-0", styles.iconBg)}>
+          <Icon size={16} strokeWidth={2.5} />
+        </div>
+        <span className={cn("text-[10px] font-bold uppercase tracking-wider", styles.accent)}>
+          {categoryLabel}
+        </span>
+        {conclusion.metric && (
+          <span className="ml-auto text-[10px] font-medium text-slate-500">
+            {conclusion.metric.label}: <strong className="text-slate-900">{conclusion.metric.value}</strong>
+          </span>
+        )}
+      </div>
+
+      {/* Headline */}
+      <h3 className="text-base font-bold text-slate-900 leading-snug mb-1.5">
+        {conclusion.headline}
+      </h3>
+
+      {/* Detail */}
+      <p className="text-sm text-slate-600 leading-relaxed mb-4">
+        {conclusion.detail}
+      </p>
+
+      {/* Footer: recomendación + confianza */}
+      <div className="mt-auto pt-3 border-t border-slate-200/70">
+        <div className="flex items-start gap-2">
+          <Lightbulb size={14} className="text-slate-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-slate-700 italic leading-relaxed">
+            {conclusion.recommendation}
+          </p>
+        </div>
+        <div className="flex items-center justify-between mt-2 text-[10px]">
+          <span className={cn("font-semibold", confidenceLabel.color)}>● {confidenceLabel.label}</span>
+        </div>
+      </div>
+    </Card>
   );
 }
 

@@ -200,10 +200,343 @@ export default async (req: Request, _context: Context) => {
     .sort((a, b) => b.opportunityScore - a.opportunityScore)
     .slice(0, 5);
 
+  // ─── Histórico mensual por ruta (últimos 18 meses) ────────────────────────
+  // Base para momentum y forecast. Solo meses CERRADOS (excluimos el mes en curso
+  // para evitar ruido del mes incompleto).
+  const monthlyRows = await sql`
+    SELECT route,
+           date_trunc('month', snapshot_date)::date AS month,
+           SUM(spend)::numeric    AS spend,
+           SUM(purchases)::bigint AS purchases,
+           SUM(revenue)::numeric  AS revenue
+    FROM (
+      SELECT route, snapshot_date, spend, purchases, revenue FROM meta_ads_campaigns
+      WHERE client_id = ${client.id}
+        AND snapshot_date >= (CURRENT_DATE - INTERVAL '18 months')
+        AND snapshot_date <  date_trunc('month', CURRENT_DATE)
+        AND route IS NOT NULL
+      UNION ALL
+      SELECT route, snapshot_date, spend, carts AS purchases, revenue FROM google_ads_campaigns
+      WHERE client_id = ${client.id}
+        AND snapshot_date >= (CURRENT_DATE - INTERVAL '18 months')
+        AND snapshot_date <  date_trunc('month', CURRENT_DATE)
+        AND route IS NOT NULL
+    ) AS combined
+    GROUP BY route, date_trunc('month', snapshot_date)
+    ORDER BY route, month
+  `;
+
+  // YoY apples-to-apples: mes en curso hasta HOY vs mismo período del año anterior.
+  // Si hoy es 5/may, comparamos 1-5 may 2026 vs 1-5 may 2025 (NO mes completo vs parcial).
+  const partialCurrentRows = await sql`
+    SELECT route, SUM(spend)::numeric AS spend, SUM(revenue)::numeric AS revenue, SUM(purchases)::bigint AS purchases
+    FROM (
+      SELECT route, spend, purchases, revenue FROM meta_ads_campaigns
+      WHERE client_id = ${client.id}
+        AND snapshot_date >= date_trunc('month', CURRENT_DATE)
+        AND snapshot_date <= CURRENT_DATE
+        AND route IS NOT NULL
+      UNION ALL
+      SELECT route, spend, carts AS purchases, revenue FROM google_ads_campaigns
+      WHERE client_id = ${client.id}
+        AND snapshot_date >= date_trunc('month', CURRENT_DATE)
+        AND snapshot_date <= CURRENT_DATE
+        AND route IS NOT NULL
+    ) AS combined
+    GROUP BY route
+  `;
+  const partialYoyRows = await sql`
+    SELECT route, SUM(spend)::numeric AS spend, SUM(revenue)::numeric AS revenue, SUM(purchases)::bigint AS purchases
+    FROM (
+      SELECT route, spend, purchases, revenue FROM meta_ads_campaigns
+      WHERE client_id = ${client.id}
+        AND snapshot_date >= (date_trunc('month', CURRENT_DATE) - INTERVAL '1 year')
+        AND snapshot_date <= (CURRENT_DATE - INTERVAL '1 year')
+        AND route IS NOT NULL
+      UNION ALL
+      SELECT route, spend, carts AS purchases, revenue FROM google_ads_campaigns
+      WHERE client_id = ${client.id}
+        AND snapshot_date >= (date_trunc('month', CURRENT_DATE) - INTERVAL '1 year')
+        AND snapshot_date <= (CURRENT_DATE - INTERVAL '1 year')
+        AND route IS NOT NULL
+    ) AS combined
+    GROUP BY route
+  `;
+
+  // Demanda histórica por mes (search terms) — solo meses cerrados también.
+  const demandMonthlyRows = await sql`
+    SELECT route,
+           date_trunc('month', snapshot_date)::date AS month,
+           SUM(clicks)::bigint AS clicks
+    FROM google_ads_search_terms
+    WHERE client_id = ${client.id}
+      AND snapshot_date >= (CURRENT_DATE - INTERVAL '6 months')
+      AND snapshot_date <  date_trunc('month', CURRENT_DATE)
+      AND route IS NOT NULL
+    GROUP BY route, date_trunc('month', snapshot_date)
+    ORDER BY route, month
+  `;
+
+  const conclusions = buildConclusions(routes, monthlyRows, demandMonthlyRows, partialCurrentRows, partialYoyRows);
+
   return new Response(JSON.stringify({
     routes,
     topGainers,
     topLosers,
     opportunities,
+    conclusions,
   }), { headers: corsHeaders() });
 };
+
+// ─── Generación de conclusiones estratégicas ────────────────────────────────
+// Toma el agregado actual de rutas + histórico mensual y aplica reglas para
+// generar narrativas accionables tipo "Mendoza está volando: +47% YoY".
+
+type Conclusion = {
+  id: string;
+  category: 'yoy' | 'mom' | 'momentum' | 'forecast' | 'efficiency' | 'demand';
+  severity: 'success' | 'warning' | 'info' | 'critical';
+  route: string;
+  headline: string;
+  detail: string;
+  recommendation: string;
+  confidence: 'alta' | 'media' | 'baja';
+  metric?: { label: string; value: string };
+};
+
+const MONTH_LABELS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+                      'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+function fmtCurrency(v: number): string {
+  return '$' + Math.round(v).toLocaleString('es-AR');
+}
+function fmtPctSigned(v: number): string {
+  return (v >= 0 ? '+' : '') + (v * 100).toFixed(0) + '%';
+}
+function fmtPctAbs(v: number): string {
+  return Math.abs(v * 100).toFixed(0) + '%';
+}
+
+function buildConclusions(
+  routes: any[],
+  monthlyRows: any[],
+  demandMonthlyRows: any[],
+  partialCurrentRows: any[],
+  partialYoyRows: any[],
+): Conclusion[] {
+  // Indexar el histórico mensual (solo meses CERRADOS)
+  type MonthRow = { month: Date; spend: number; revenue: number; purchases: number; roas: number };
+  const history = new Map<string, MonthRow[]>();
+  for (const r of monthlyRows) {
+    const route = r.route as string;
+    const month = new Date(r.month);
+    const spend = Number(r.spend);
+    const revenue = Number(r.revenue);
+    const purchases = Number(r.purchases);
+    if (!history.has(route)) history.set(route, []);
+    history.get(route)!.push({
+      month, spend, revenue, purchases,
+      roas: spend > 0 ? revenue / spend : 0,
+    });
+  }
+  // YoY apples-to-apples: mismo número de días del mes actual vs año pasado
+  const partialCurrent = new Map<string, { spend: number; revenue: number; purchases: number }>();
+  const partialYoy = new Map<string, { spend: number; revenue: number; purchases: number }>();
+  for (const r of partialCurrentRows) {
+    partialCurrent.set(r.route, { spend: Number(r.spend), revenue: Number(r.revenue), purchases: Number(r.purchases) });
+  }
+  for (const r of partialYoyRows) {
+    partialYoy.set(r.route, { spend: Number(r.spend), revenue: Number(r.revenue), purchases: Number(r.purchases) });
+  }
+  const demandHistory = new Map<string, { month: Date; clicks: number }[]>();
+  for (const r of demandMonthlyRows) {
+    const route = r.route as string;
+    if (!demandHistory.has(route)) demandHistory.set(route, []);
+    demandHistory.get(route)!.push({ month: new Date(r.month), clicks: Number(r.clicks) });
+  }
+
+  // Solo generamos conclusiones para rutas con relevancia económica:
+  // spend > $5K en el período actual.
+  const relevantRoutes = routes.filter(r => r.spend > 5000);
+
+  const out: Conclusion[] = [];
+  const today = new Date();
+  const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const dayOfMonth = today.getDate();
+  const monthLabel = MONTH_LABELS[currentMonthStart.getMonth()];
+  const prevYear = currentMonthStart.getFullYear() - 1;
+
+  for (const route of relevantRoutes) {
+    const hist = history.get(route.route) ?? [];
+
+    // ─── 1. YoY apples-to-apples: 1-N del mes actual vs 1-N del mismo mes año pasado
+    const cur = partialCurrent.get(route.route);
+    const yoy = partialYoy.get(route.route);
+    if (cur && yoy && yoy.revenue > 1000 && cur.spend > 0) {
+      const revPct = (cur.revenue - yoy.revenue) / yoy.revenue;
+      const spendPct = yoy.spend > 0 ? (cur.spend - yoy.spend) / yoy.spend : 0;
+      if (Math.abs(revPct) >= 0.15) {
+        const isGrowing = revPct > 0;
+        const efficient = isGrowing && spendPct < revPct;
+        out.push({
+          id: `yoy-${route.route}`,
+          category: 'yoy',
+          severity: isGrowing ? 'success' : 'warning',
+          route: route.route,
+          headline: isGrowing
+            ? `${route.route}: ${fmtPctSigned(revPct)} de revenue vs ${monthLabel} ${prevYear}`
+            : `${route.route}: cae ${fmtPctAbs(revPct)} vs ${monthLabel} ${prevYear}`,
+          detail: `En los primeros ${dayOfMonth} días de ${monthLabel} generó ${fmtCurrency(cur.revenue)}, contra ${fmtCurrency(yoy.revenue)} en el mismo período de ${prevYear}. La inversión fue ${fmtPctSigned(spendPct)}.`,
+          recommendation: isGrowing
+            ? (efficient
+              ? `Vendés más con menos plata: vale la pena replicar lo que estás haciendo y considerar ampliar el budget.`
+              : `Considerá mantener el presupuesto en ${route.route} mientras siga el crecimiento.`)
+            : `Vale la pena revisar qué cambió respecto al año pasado: estacionalidad, competencia o creatives.`,
+          confidence: 'alta',
+          metric: { label: 'Revenue MTD', value: fmtCurrency(cur.revenue) },
+        });
+      }
+    }
+
+    // ─── 2. Momentum: 3+ meses CERRADOS consecutivos ────────────────────
+    // hist solo tiene meses cerrados, así que tomar últimos 4 ya excluye el actual.
+    if (hist.length >= 4) {
+      const last4 = hist.slice(-4);
+      let consecutiveUp = 0;
+      let consecutiveDown = 0;
+      for (let i = 1; i < last4.length; i++) {
+        if (last4[i].revenue > last4[i - 1].revenue * 1.02) consecutiveUp++;
+        else if (last4[i].revenue < last4[i - 1].revenue * 0.98) consecutiveDown++;
+      }
+      if (consecutiveUp >= 3) {
+        const first = last4[0];
+        const last = last4[last4.length - 1];
+        const totalGrowth = (last.revenue - first.revenue) / first.revenue;
+        out.push({
+          id: `momentum-up-${route.route}`,
+          category: 'momentum',
+          severity: 'success',
+          route: route.route,
+          headline: `${route.route} crece 3 meses seguidos`,
+          detail: `Revenue pasó de ${fmtCurrency(first.revenue)} a ${fmtCurrency(last.revenue)} (${fmtPctSigned(totalGrowth)}). ROAS evolucionó de ${first.roas.toFixed(1)}x a ${last.roas.toFixed(1)}x.`,
+          recommendation: `Vale la pena considerar escalar budget en ${route.route} mientras el momentum se sostiene.`,
+          confidence: 'alta',
+        });
+      } else if (consecutiveDown >= 3) {
+        const first = last4[0];
+        const last = last4[last4.length - 1];
+        const totalDrop = (last.revenue - first.revenue) / first.revenue;
+        out.push({
+          id: `momentum-down-${route.route}`,
+          category: 'momentum',
+          severity: 'critical',
+          route: route.route,
+          headline: `${route.route} cae 3 meses seguidos`,
+          detail: `Revenue pasó de ${fmtCurrency(first.revenue)} a ${fmtCurrency(last.revenue)} (${fmtPctSigned(totalDrop)}). ROAS bajó de ${first.roas.toFixed(1)}x a ${last.roas.toFixed(1)}x.`,
+          recommendation: `Vale la pena revisar creatives, audiencia o pricing antes de seguir invirtiendo en ${route.route}.`,
+          confidence: 'alta',
+        });
+      }
+    }
+
+    // ─── 3. Forecast: cómo se compara el mes que viene vs el actual ─────
+    // Usamos el último mes CERRADO como base (no el actual incompleto que daría 0 o subestimaría).
+    const lastClosedMonth = hist[hist.length - 1];
+    if (lastClosedMonth && lastClosedMonth.revenue > 1000) {
+      const nextMonthStart = addMonths(currentMonthStart, 1);
+      const nextMonthLabel = MONTH_LABELS[nextMonthStart.getMonth()];
+      const lastClosedLabel = MONTH_LABELS[lastClosedMonth.month.getMonth()];
+      // Buscamos el mismo mes próximo del año pasado y el mismo mes cerrado del año pasado
+      const nextYoy = hist.find(h => sameMonth(h.month, addMonths(nextMonthStart, -12)));
+      const lastYoy = hist.find(h => sameMonth(h.month, addMonths(lastClosedMonth.month, -12)));
+      if (nextYoy && lastYoy && lastYoy.revenue > 1000) {
+        const yoyRatio = (nextYoy.revenue - lastYoy.revenue) / lastYoy.revenue;
+        if (Math.abs(yoyRatio) >= 0.10) {
+          const projection = lastClosedMonth.revenue * (1 + yoyRatio);
+          const better = yoyRatio > 0;
+          const nextMonthCap = nextMonthLabel.charAt(0).toUpperCase() + nextMonthLabel.slice(1);
+          out.push({
+            id: `forecast-${route.route}`,
+            category: 'forecast',
+            severity: 'info',
+            route: route.route,
+            headline: `${nextMonthCap} suele ser ${better ? 'mejor' : 'peor'} para ${route.route}`,
+            detail: `El año pasado ${nextMonthLabel} generó ${fmtPctAbs(yoyRatio)} ${better ? 'más' : 'menos'} que ${lastClosedLabel}. Si el patrón se repite, esperate cerca de ${fmtCurrency(projection)} de revenue.`,
+            recommendation: better
+              ? `Vale la pena tener creatives listos y considerar anticipar parte del budget para no perder el upside.`
+              : `Considerá mantener inversión moderada en ${route.route} y reasignar a rutas con mejor ratio en ${nextMonthLabel}.`,
+            confidence: 'media',  // 1 año de muestra
+          });
+        }
+      }
+    }
+  }
+
+  // ─── 4. Eficiencia comparativa: solo si la peor está significativamente abajo del promedio ─
+  // En Andesmar muchas rutas tienen ROAS 20x+, no tiene sentido pelear entre 67x y 22x.
+  // Solo flageamos cuando hay rutas claramente subóptimas vs el promedio del top.
+  const topByRevenue = [...relevantRoutes].sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+  if (topByRevenue.length >= 3) {
+    const sortedByRoas = [...topByRevenue].sort((a, b) => b.roas - a.roas);
+    const best = sortedByRoas[0];
+    const worst = sortedByRoas[sortedByRoas.length - 1];
+    const avgRoas = sortedByRoas.reduce((s, r) => s + r.roas, 0) / sortedByRoas.length;
+    // Reportar solo si el peor está al menos 40% debajo del promedio del top
+    if (best.roas > 0 && worst.roas > 0 && worst.roas < avgRoas * 0.6) {
+      const gap = (best.roas - worst.roas) / worst.roas;
+      out.push({
+        id: `efficiency-${best.route}-vs-${worst.route}`,
+        category: 'efficiency',
+        severity: 'info',
+        route: best.route,
+        headline: `${worst.route} rinde menos que el promedio del top`,
+        detail: `Entre las rutas top, ${best.route} devuelve $${best.roas.toFixed(2)} por cada $1, mientras ${worst.route} solo devuelve $${worst.roas.toFixed(2)}. Diferencia de ${fmtPctAbs(gap)}.`,
+        recommendation: `Vale la pena evaluar si conviene reasignar parte del budget de ${worst.route} hacia ${best.route}, o revisar qué está limitando la performance de ${worst.route}.`,
+        confidence: 'alta',
+      });
+    }
+  }
+
+  // ─── 5. Oportunidades de demanda: clicks subiendo + spend bajando ──────
+  const currentMonthDate = currentMonthStart;
+  const prevMonthDate = addMonths(currentMonthStart, -1);
+  for (const route of relevantRoutes) {
+    const dh = demandHistory.get(route.route) ?? [];
+    const cur = dh.find(d => sameMonth(d.month, currentMonthDate));
+    const prev = dh.find(d => sameMonth(d.month, prevMonthDate));
+    if (cur && prev && prev.clicks > 50) {
+      const clicksDelta = (cur.clicks - prev.clicks) / prev.clicks;
+      if (clicksDelta >= 0.30 && route.spendDelta <= 0.05) {
+        // Demanda crece +30% pero spend se mantiene/baja → oportunidad
+        out.push({
+          id: `demand-${route.route}`,
+          category: 'demand',
+          severity: 'info',
+          route: route.route,
+          headline: `Crece la demanda de ${route.route} pero la inversión no acompaña`,
+          detail: `La gente busca ${route.route} ${fmtPctSigned(clicksDelta)} más este mes (${cur.clicks} clicks vs ${prev.clicks} el anterior), pero la inversión se mantuvo casi igual.`,
+          recommendation: `Vale la pena considerar subir budget en ${route.route} para capturar la demanda creciente antes que la competencia.`,
+          confidence: 'media',
+        });
+      }
+    }
+  }
+
+  // Orden final: críticas/warnings primero, después success, después info
+  const severityRank: Record<Conclusion['severity'], number> = {
+    critical: 0, warning: 1, success: 2, info: 3,
+  };
+  out.sort((a, b) => severityRank[a.severity] - severityRank[b.severity]);
+
+  // Cap a 8 conclusiones para no saturar
+  return out.slice(0, 8);
+}
+
+function sameMonth(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+function addMonths(d: Date, months: number): Date {
+  const r = new Date(d);
+  r.setMonth(r.getMonth() + months);
+  return r;
+}
