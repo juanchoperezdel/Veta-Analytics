@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { sql, corsHeaders, errorResponse } from './_db';
 import { verifyToken, authorizeSlug, unauthorizedResponse } from './_auth';
+import { buildSeasonalityConclusions } from './_conclusions';
 
 // Estacionalidad — combina dos fuentes:
 //   - Heat-map día×hora y "por hora" → tablas *_hourly (siempre últimos 14 días)
@@ -203,6 +204,9 @@ export default async (req: Request, _context: Context) => {
   const worstDom = [...goodDoms].sort((a, b) => a.revenue - b.revenue)[0] ?? null;
   const bestPhase = [...phases].filter(p => p.spend > 0).sort((a, b) => b.roas - a.roas)[0] ?? null;
 
+  // Conclusiones estratégicas auto-generadas
+  const conclusions = buildSeasonalityConclusions({ cells, dows, daysOfMonth, phases, source });
+
   return new Response(JSON.stringify({
     source,
     cells,
@@ -219,5 +223,6 @@ export default async (req: Request, _context: Context) => {
     bestDom,
     worstDom,
     bestPhase,
+    conclusions,
   }), { headers: corsHeaders() });
 };

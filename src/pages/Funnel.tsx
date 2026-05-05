@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { api, getClients } from '@/lib/api';
 import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
 import type { DateRange } from '@/components/ui/DateRangePicker';
+import { ConclusionsSection, type Conclusion } from '@/components/ui/ConclusionCard';
 
 type Stage = {
   label: string;
@@ -19,6 +20,7 @@ type FunnelData = {
   totalConversion: number;
   totalConversionDelta: number;
   revenue: { value: number; delta: number };
+  conclusions?: Conclusion[];
 };
 
 export default function Funnel() {
@@ -66,6 +68,11 @@ export default function Funnel() {
         </div>
         <DateRangePicker value={range} onChange={setRange} />
       </div>
+
+      {/* Conclusiones estratégicas */}
+      {data.conclusions && data.conclusions.length > 0 && (
+        <ConclusionsSection conclusions={data.conclusions} />
+      )}
 
       {/* Top stats: conversión total y revenue */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

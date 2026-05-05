@@ -7,6 +7,7 @@ import { api, getClients } from '@/lib/api';
 import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
 import type { DateRange } from '@/components/ui/DateRangePicker';
 import type { GoogleAdsCampaign, PlatformKPIs } from '@/data/types';
+import { ConclusionsSection, type Conclusion } from '@/components/ui/ConclusionCard';
 
 type SearchTerm = {
   term: string; route: string | null;
@@ -42,6 +43,7 @@ export default function GoogleAds() {
   const [campaigns, setCampaigns] = useState<GoogleAdsCampaign[]>([]);
   const [searchTerms, setSearchTerms] = useState<SearchTermsData | null>(null);
   const [competitors, setCompetitors] = useState<CompetitorsData | null>(null);
+  const [conclusions, setConclusions] = useState<Conclusion[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [range, setRange] = useState<DateRange>(defaultRange());
@@ -59,6 +61,7 @@ export default function GoogleAds() {
     ]).then(([gads, st, comp]) => {
       setKpis(gads.kpis);
       setCampaigns(gads.campaigns ?? []);
+      setConclusions(gads.conclusions ?? []);
       setSearchTerms(st);
       setCompetitors(comp);
     }).finally(() => setLoading(false));
@@ -88,6 +91,11 @@ export default function GoogleAds() {
         <SmallKpiCard title="Carritos"   value={formatNumber(kpis.carts?.value ?? 0)}     delta={kpis.carts?.delta ?? 0} />
         <SmallKpiCard title="AOV"        value={formatCurrency(kpis.aov?.value ?? 0)}     delta={kpis.aov?.delta ?? 0} />
       </div>
+
+      {/* Conclusiones estratégicas */}
+      {conclusions.length > 0 && (
+        <ConclusionsSection conclusions={conclusions} />
+      )}
 
       {/* Análisis de competencia */}
       {competitors?.configured && competitors.totals && competitors.totals.cost > 0 && (

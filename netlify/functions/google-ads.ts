@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { sql, corsHeaders, errorResponse } from './_db';
 import { verifyToken, authorizeSlug, unauthorizedResponse } from './_auth';
+import { buildGoogleAdsConclusions } from './_conclusions';
 
 export default async (req: Request, context: Context) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
@@ -131,7 +132,77 @@ export default async (req: Request, context: Context) => {
     };
   });
 
-  return new Response(JSON.stringify({ kpis, campaigns }), { headers: corsHeaders() });
+  // ─── Datos auxiliares para generar conclusiones ────────────────────────
+  // Top converters de search terms del rango
+  const topConvertersRows = await sql`
+    SELECT search_term, SUM(clicks)::bigint AS clicks, SUM(cost)::numeric AS cost,
+           SUM(conversions)::numeric AS conversions, SUM(conv_value)::numeric AS conv_value
+    FROM google_ads_search_terms
+    WHERE client_id = ${client.id}
+      AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+    GROUP BY search_term
+    HAVING SUM(conversions) > 0.5
+    ORDER BY SUM(conv_value) DESC
+    LIMIT 10
+  `;
+  const topConverters = topConvertersRows.map((r: any) => ({
+    term: r.search_term,
+    clicks: Number(r.clicks),
+    cost: Number(r.cost),
+    conversions: Number(r.conversions),
+    convValue: Number(r.conv_value),
+    roas: Number(r.cost) > 0 ? Number(r.conv_value) / Number(r.cost) : 0,
+  }));
+
+  // Wasted spend total para el ahorro estimado
+  const [wastedAgg] = await sql`
+    SELECT COALESCE(SUM(cost), 0)::numeric AS cost, COUNT(*)::bigint AS num_terms
+    FROM (
+      SELECT search_term, SUM(cost) AS cost, SUM(conversions) AS conversions
+      FROM google_ads_search_terms
+      WHERE client_id = ${client.id}
+        AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+      GROUP BY search_term
+      HAVING SUM(cost) >= 1000 AND SUM(conversions) < 0.5
+    ) AS x
+  `;
+  const startD = start ?? new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
+  const endD   = end   ?? new Date().toISOString().slice(0, 10);
+  const days = Math.max(1, Math.ceil((new Date(endD).getTime() - new Date(startD).getTime()) / 86400000) + 1);
+  const monthlySavings = (Number(wastedAgg.cost) / days) * 30;
+  const searchTermsData = {
+    topConverters,
+    actionable: { monthlySavings, negativeKeywordsCount: Number(wastedAgg.num_terms) },
+  };
+
+  // Datos básicos de competidores (matches simples por ILIKE)
+  const COMPETITOR_TOKENS = ['flecha bus', 'flechabus', 'busplus', 'bus plus', 'cata', 'via bariloche', 'crucero del norte', 'general urquiza', 'el rapido', 'plataforma 10', 'omnilineas', 'plusmar'];
+  const allTermsForComp = await sql`
+    SELECT search_term, SUM(cost)::numeric AS cost, SUM(conv_value)::numeric AS conv_value
+    FROM google_ads_search_terms
+    WHERE client_id = ${client.id} AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+    GROUP BY search_term
+  `;
+  let compCost = 0, compRev = 0;
+  for (const r of allTermsForComp) {
+    const term = String(r.search_term).toLowerCase();
+    if (COMPETITOR_TOKENS.some(t => term.includes(t))) {
+      compCost += Number(r.cost);
+      compRev += Number(r.conv_value);
+    }
+  }
+  const competitorsData = {
+    configured: true,
+    totals: {
+      cost: compCost,
+      roas: compCost > 0 ? compRev / compCost : 0,
+    },
+    monthlyProjection: { cost: (compCost / days) * 30 },
+  };
+
+  const conclusions = buildGoogleAdsConclusions({ campaigns, searchTermsData, competitorsData, kpis });
+
+  return new Response(JSON.stringify({ kpis, campaigns, conclusions }), { headers: corsHeaders() });
 };
 
 // Score: 'scale' / 'ok' / 'optimize' / 'pause' basado en reglas simples sobre 7 días.

@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/Card';
 import { api, getClients } from '@/lib/api';
 import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
 import type { DateRange } from '@/components/ui/DateRangePicker';
+import { ConclusionsSection, type Conclusion } from '@/components/ui/ConclusionCard';
 
 type Cell = { dow: number; hour: number; spend: number; purchases: number; revenue: number; roas: number };
 type DowAgg = { dow: number; label: string; spend: number; revenue: number; purchases: number; roas: number; sampleSize: number };
@@ -30,6 +31,7 @@ type SeasonalityData = {
   bestDom: DomAgg | null;
   worstDom: DomAgg | null;
   bestPhase: PhaseAgg | null;
+  conclusions?: Conclusion[];
 };
 
 type Source = 'all' | 'meta' | 'google';
@@ -120,6 +122,11 @@ export default function Seasonality() {
           ))}
         </div>
       </div>
+
+      {/* Conclusiones estratégicas — auto-generadas */}
+      {data.conclusions && data.conclusions.length > 0 && (
+        <ConclusionsSection conclusions={data.conclusions} />
+      )}
 
       {/* Por fase del mes — 3 cards principales */}
       <section>

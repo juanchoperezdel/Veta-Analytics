@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { sql, corsHeaders, errorResponse } from './_db';
 import { verifyToken, authorizeSlug, unauthorizedResponse } from './_auth';
+import { buildMetaAdsConclusions } from './_conclusions';
 
 export default async (req: Request, context: Context) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
@@ -142,7 +143,77 @@ export default async (req: Request, context: Context) => {
     };
   });
 
-  return new Response(JSON.stringify({ kpis, campaigns }), { headers: corsHeaders() });
+  // ─── Datos auxiliares para conclusiones ───────────────────────────────
+  // Top creatives del rango
+  const creativeRows = await sql`
+    SELECT ad_id, MAX(ad_name) AS ad_name,
+           SUM(spend)::numeric AS spend, SUM(impressions)::bigint AS impressions,
+           SUM(clicks)::bigint AS clicks, SUM(reach)::bigint AS reach,
+           SUM(purchases)::bigint AS purchases, SUM(revenue)::numeric AS revenue
+    FROM meta_ads_creatives
+    WHERE client_id = ${client.id}
+      AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+    GROUP BY ad_id
+    HAVING SUM(spend) > 0
+    ORDER BY SUM(spend) DESC
+    LIMIT 30
+  `;
+  const creatives = creativeRows.map((c: any) => {
+    const sp = Number(c.spend);
+    const re = Number(c.revenue);
+    return {
+      adId: c.ad_id,
+      adName: c.ad_name,
+      spend: sp,
+      revenue: re,
+      purchases: Number(c.purchases),
+      roas: sp > 0 ? re / sp : 0,
+    };
+  });
+
+  // Demographic mismatches (replicamos lógica liviana de demographics.ts)
+  const breakdownRows = await sql`
+    SELECT dimension_type, dimension_value,
+           SUM(spend)::numeric AS spend, SUM(purchases)::bigint AS purchases, SUM(revenue)::numeric AS revenue
+    FROM meta_ads_breakdowns
+    WHERE client_id = ${client.id}
+      AND snapshot_date BETWEEN ${startDate} AND ${endDate}
+    GROUP BY dimension_type, dimension_value
+    HAVING SUM(spend) > 0
+  `;
+  const byDim: Record<string, any[]> = { age: [], gender: [], region: [], publisher_platform: [] };
+  for (const r of breakdownRows) {
+    const sp = Number(r.spend), pu = Number(r.purchases), re = Number(r.revenue);
+    if (!byDim[r.dimension_type]) byDim[r.dimension_type] = [];
+    byDim[r.dimension_type].push({
+      value: r.dimension_value, spend: sp, purchases: pu, revenue: re,
+      roas: sp > 0 ? re / sp : 0,
+    });
+  }
+  function findMismatch(items: any[], dimName: string) {
+    if (!items?.length) return null;
+    const totalSpend = items.reduce((s, i) => s + i.spend, 0);
+    const totalPurch = items.reduce((s, i) => s + i.purchases, 0);
+    if (totalSpend === 0 || totalPurch === 0) return null;
+    const enriched = items.map(i => ({
+      value: i.value, spendShare: i.spend / totalSpend, purchShare: i.purchases / totalPurch,
+      gap: (i.purchases / totalPurch) - (i.spend / totalSpend), roas: i.roas, spend: i.spend, purchases: i.purchases,
+    }));
+    const overspent = [...enriched].sort((a, b) => a.gap - b.gap).filter(x => x.gap < -0.05).slice(0, 3);
+    const underspent = [...enriched].sort((a, b) => b.gap - a.gap).filter(x => x.gap > 0.05 && x.purchases >= 5).slice(0, 3);
+    return { dimension: dimName, overspent, underspent };
+  }
+  const mismatches = [
+    findMismatch(byDim.age, 'Edad'),
+    findMismatch(byDim.gender, 'Género'),
+    findMismatch(byDim.region, 'Región'),
+    findMismatch(byDim.publisher_platform, 'Placement'),
+  ].filter(m => m !== null);
+
+  const demographics = { mismatches };
+  const conclusions = buildMetaAdsConclusions({ campaigns, creatives, demographics, kpis });
+
+  return new Response(JSON.stringify({ kpis, campaigns, conclusions }), { headers: corsHeaders() });
 };
 
 // Score: 'scale' / 'ok' / 'optimize' / 'pause' basado en reglas simples.

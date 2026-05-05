@@ -7,6 +7,7 @@ import { api, getClients } from '@/lib/api';
 import { DateRangePicker, defaultRange } from '@/components/ui/DateRangePicker';
 import type { DateRange } from '@/components/ui/DateRangePicker';
 import type { MetaAdsCampaign, PlatformKPIs } from '@/data/types';
+import { ConclusionsSection, type Conclusion } from '@/components/ui/ConclusionCard';
 
 type Creative = {
   adId: string; adName: string; campaignName: string; thumbnailUrl: string | null;
@@ -27,6 +28,7 @@ export default function MetaAds() {
   const [campaigns, setCampaigns] = useState<MetaAdsCampaign[]>([]);
   const [creatives, setCreatives] = useState<Creative[]>([]);
   const [demographics, setDemographics] = useState<Demographics | null>(null);
+  const [conclusions, setConclusions] = useState<Conclusion[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [range, setRange] = useState<DateRange>(defaultRange());
@@ -44,6 +46,7 @@ export default function MetaAds() {
     ]).then(([metaData, creativesData, demoData]) => {
       setKpis(metaData.kpis);
       setCampaigns(metaData.campaigns ?? []);
+      setConclusions(metaData.conclusions ?? []);
       setCreatives(creativesData.creatives ?? []);
       setDemographics(demoData);
     }).finally(() => setLoading(false));
@@ -75,6 +78,11 @@ export default function MetaAds() {
         <SmallKpiCard title="ROAS"      value={`${kpis.roas.value.toFixed(2)}x`}           delta={kpis.roas.delta} />
         <SmallKpiCard title="AOV"       value={formatCurrency(kpis.aov?.value ?? 0)}       delta={kpis.aov?.delta ?? 0} />
       </div>
+
+      {/* Conclusiones estratégicas */}
+      {conclusions.length > 0 && (
+        <ConclusionsSection conclusions={conclusions} />
+      )}
 
       {/* Demographics: 4 cards en grid */}
       {demographics && (demographics.age.length > 0 || demographics.gender.length > 0) && (

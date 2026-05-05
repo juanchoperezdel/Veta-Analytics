@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { sql, corsHeaders, errorResponse } from './_db';
 import { verifyToken, authorizeSlug, unauthorizedResponse } from './_auth';
+import { buildFunnelConclusions } from './_conclusions';
 
 // Embudo de conversión: Sesiones → Carritos → Compras
 // Datos de business_kpis (GA4). Devuelve etapas + ratios + delta vs mes pasado.
@@ -84,10 +85,15 @@ export default async (req: Request, _context: Context) => {
   const totalConversion     = cUsers > 0 ? cTickets / cUsers : 0;
   const prevTotalConversion = pUsers > 0 ? pTickets / pUsers : 0;
 
+  const totalConversionDelta = delta(totalConversion, prevTotalConversion);
+  const revenue = { value: cRevenue, delta: delta(cRevenue, pRevenue) };
+  const conclusions = buildFunnelConclusions({ stages, totalConversion, totalConversionDelta, revenue });
+
   return new Response(JSON.stringify({
     stages,
     totalConversion,
-    totalConversionDelta: delta(totalConversion, prevTotalConversion),
-    revenue: { value: cRevenue, delta: delta(cRevenue, pRevenue) },
+    totalConversionDelta,
+    revenue,
+    conclusions,
   }), { headers: corsHeaders() });
 };

@@ -5,6 +5,7 @@ import { formatCurrency, formatNumber, cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/Card';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { api, getClients } from '@/lib/api';
+import { ConclusionsSection, type Conclusion } from '@/components/ui/ConclusionCard';
 
 type ChannelData = { spend: number; revenue: number; purchases: number; roas: number };
 type MonthRow = { month: string; meta: ChannelData; google: ChannelData; total: ChannelData };
@@ -27,6 +28,7 @@ function formatMonth(ym: string) {
 export default function Evolutivo() {
   const { clientSlug } = useParams();
   const [months, setMonths] = useState<MonthRow[]>([]);
+  const [conclusions, setConclusions] = useState<Conclusion[]>([]);
   const [loading, setLoading] = useState(true);
   const [metric, setMetric] = useState<MetricKey>('revenue');
 
@@ -37,7 +39,10 @@ export default function Evolutivo() {
     if (!clientSlug) return;
     setLoading(true);
     api.evolutivo(clientSlug)
-      .then(data => setMonths(data.months ?? []))
+      .then(data => {
+        setMonths(data.months ?? []);
+        setConclusions(data.conclusions ?? []);
+      })
       .finally(() => setLoading(false));
   }, [clientSlug]);
 
@@ -91,6 +96,11 @@ export default function Evolutivo() {
           ))}
         </div>
       </div>
+
+      {/* Conclusiones estratégicas */}
+      {conclusions.length > 0 && (
+        <ConclusionsSection conclusions={conclusions} />
+      )}
 
       <div>
         <h2 className="text-2xl font-bold tracking-tight text-slate-900">{metricDef.label} por mes</h2>

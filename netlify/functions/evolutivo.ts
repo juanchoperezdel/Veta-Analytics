@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions';
 import { sql, corsHeaders, errorResponse } from './_db';
 import { verifyToken, authorizeSlug, unauthorizedResponse } from './_auth';
+import { buildEvolutivoConclusions } from './_conclusions';
 
 export default async (req: Request, _context: Context) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
@@ -76,5 +77,7 @@ export default async (req: Request, _context: Context) => {
     };
   });
 
-  return new Response(JSON.stringify({ months }), { headers: corsHeaders() });
+  const conclusions = buildEvolutivoConclusions(months);
+
+  return new Response(JSON.stringify({ months, conclusions }), { headers: corsHeaders() });
 };
