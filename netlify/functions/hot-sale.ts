@@ -1,8 +1,10 @@
 import type { Context } from '@netlify/functions';
 import { sql, corsHeaders, errorResponse } from './_db';
 
-// Informe Hot Sale Andesmar — endpoint público gateado por HOT_SALE_TOKEN.
-// No usa JWT ni autorización por slug — el token de URL es el único gate.
+// Informe Hot Sale Andesmar — endpoint público (sin auth).
+// El gate es por oscuridad: el path del front (/hot-sale-andesmar-2026) no
+// está linkeado desde ningún lado y no se indexa naturalmente. Si hay que
+// revocar acceso se cambia el path en App.tsx y se redeploya.
 //
 // Devuelve en una sola respuesta las 3 secciones del informe:
 //   1. Semana base (4-10 mayo 2026) vs Hot Week (11-17 mayo 2026), con curva
@@ -23,10 +25,6 @@ const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viern
 
 export default async (req: Request, _context: Context) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
-
-  const token = new URL(req.url).searchParams.get('token');
-  if (!process.env.HOT_SALE_TOKEN) return errorResponse('Hot Sale token no configurado en el servidor', 503);
-  if (token !== process.env.HOT_SALE_TOKEN) return errorResponse('Token inválido', 401);
 
   const [client] = await sql`SELECT id FROM clients WHERE slug = ${SLUG}`;
   if (!client) return errorResponse('Client not found', 404);

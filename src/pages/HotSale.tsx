@@ -1,4 +1,3 @@
-import { useParams } from 'react-router-dom';
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowUpRight, ArrowDownRight, Flame, Calendar, TrendingUp, Sparkles,
@@ -79,16 +78,14 @@ type HotSaleData = {
 };
 
 export default function HotSale() {
-  const { token } = useParams();
   const [data, setData] = useState<HotSaleData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) return;
     setLoading(true);
     setError(null);
-    fetch(`${BASE}/hot-sale?token=${encodeURIComponent(token)}`)
+    fetch(`${BASE}/hot-sale`)
       .then(async r => {
         const json = await r.json();
         if (!r.ok || json.error) {
@@ -100,14 +97,14 @@ export default function HotSale() {
       })
       .catch(err => setError(err?.message ?? String(err)))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, []);
 
   if (loading) return <FullScreenStatus title="Cargando informe Hot Sale..." subtitle="Andesmar · Veta Analytics" />;
 
   if (error) return (
     <FullScreenStatus
       title="No pudimos cargar el informe"
-      subtitle={error.includes('Token') || error.includes('inv') ? 'Link inválido. Pedí el link correcto.' : `Error: ${error}`}
+      subtitle={`Error: ${error}`}
       isError
     />
   );

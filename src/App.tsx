@@ -23,7 +23,7 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/hot-sale/:token" element={<HotSale />} />
+        <Route path="/hot-sale-andesmar-2026" element={<HotSale />} />
         <Route path="/" element={<Navigate to="/andesmar/pulse" replace />} />
 
         <Route path="/:clientSlug" element={<RequireAuth><AppLayout /></RequireAuth>}>
