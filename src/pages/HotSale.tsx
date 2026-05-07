@@ -400,28 +400,42 @@ function KpiCard({
   hotLabel?: string;
 }) {
   const fmtFn = fmt === 'currency' ? formatCurrency : fmt === 'number' ? formatNumber : (n: number) => `$${n.toFixed(2)}`;
-  const delta = base > 0 ? (hot - base) / base : (hot > 0 ? 1 : 0);
+  const hotIsEmpty = hot === 0 && base > 0;
+
+  // Si Hot Week aún no tiene data, mostrar la Semana Base como protagonista
+  const bigValue   = hotIsEmpty ? base : hot;
+  const bigLabel   = hotIsEmpty ? baseLabel : hotLabel;
+  const smallValue = hotIsEmpty ? hot : base;
+  const smallLabel = hotIsEmpty ? hotLabel : baseLabel;
+
+  const bothHaveData = base > 0 && hot > 0;
+  const delta = bothHaveData ? (hot - base) / base : 0;
   const isPositive = invertColor ? delta < 0 : delta > 0;
   const Arrow = delta >= 0 ? ArrowUpRight : ArrowDownRight;
-  const colorClass = base === 0 && hot === 0
-    ? 'text-slate-400'
-    : isPositive
-      ? 'text-emerald-700 bg-emerald-50'
-      : 'text-rose-700 bg-rose-50';
 
   return (
     <Card className="p-4">
       <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">{label}</div>
-      <div className="flex items-baseline justify-between">
-        <div className="text-xl font-bold text-slate-900 tabular-nums">{fmtFn(hot)}{suffix}</div>
-        <div className={cn("flex items-center gap-0.5 text-xs font-bold rounded px-1.5 py-0.5", colorClass)}>
-          <Arrow size={12} />
-          {Math.abs(delta * 100).toFixed(0)}%
-        </div>
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="text-xl font-bold text-slate-900 tabular-nums">{fmtFn(bigValue)}{suffix}</div>
+        {bothHaveData ? (
+          <div className={cn("flex items-center gap-0.5 text-xs font-bold rounded px-1.5 py-0.5",
+            isPositive ? "text-emerald-700 bg-emerald-50" : "text-rose-700 bg-rose-50"
+          )}>
+            <Arrow size={12} />
+            {Math.abs(delta * 100).toFixed(0)}%
+          </div>
+        ) : (
+          <div className="text-[10px] font-semibold rounded px-1.5 py-0.5 text-amber-700 bg-amber-50 whitespace-nowrap">
+            {hotIsEmpty ? 'pendiente' : 'sin data'}
+          </div>
+        )}
       </div>
       <div className="mt-2 pt-2 border-t border-slate-100 flex justify-between text-[11px] text-slate-400">
-        <span>{baseLabel}: {fmtFn(base)}</span>
-        <span className="font-semibold text-slate-600">{hotLabel}</span>
+        <span className="truncate">
+          {smallLabel}: {hotIsEmpty ? <span className="italic">aún no comenzó</span> : fmtFn(smallValue)}
+        </span>
+        <span className="font-semibold text-slate-600 shrink-0">{bigLabel}</span>
       </div>
     </Card>
   );
@@ -436,7 +450,9 @@ function ChannelCompareCard({ label, base, hot, color, baseLabel = 'Semana base'
 }) {
   const colorClass = color === 'blue' ? 'text-blue-700 bg-blue-50' : 'text-emerald-700 bg-emerald-50';
   const dot = color === 'blue' ? 'bg-blue-500' : 'bg-emerald-500';
-  function delta(c: number, p: number) { return p > 0 ? (c - p) / p : (c > 0 ? 1 : 0); }
+  // Si el spend del Hot Week es 0 y el de la Base > 0, todo el card se invierte
+  // (la Base se vuelve la columna principal y Hot Week aparece como pendiente).
+  const hotIsEmpty = hot.spend === 0 && base.spend > 0;
   return (
     <Card className="p-5">
       <div className="flex items-center justify-between mb-4">
@@ -444,36 +460,56 @@ function ChannelCompareCard({ label, base, hot, color, baseLabel = 'Semana base'
           <span className={cn("w-2 h-2 rounded-full", dot)} />
           <h3 className="text-base font-bold text-slate-900">{label}</h3>
         </div>
-        <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded uppercase", colorClass)}>{label.split(' ')[0]}</span>
+        {hotIsEmpty ? (
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase text-amber-700 bg-amber-50">{hotLabel} pendiente</span>
+        ) : (
+          <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded uppercase", colorClass)}>{label.split(' ')[0]}</span>
+        )}
       </div>
-      <div className="space-y-2 text-sm">
-        <CompareRow label="Inversión"   base={base.spend}     hot={hot.spend}     fmt="currency" delta={delta(hot.spend,     base.spend)}     baseLabel={baseLabel} hotLabel={hotLabel} invertColor />
-        <CompareRow label="Ingresos"    base={base.revenue}   hot={hot.revenue}   fmt="currency" delta={delta(hot.revenue,   base.revenue)}   baseLabel={baseLabel} hotLabel={hotLabel} />
-        <CompareRow label="Compras"     base={base.purchases} hot={hot.purchases} fmt="number"   delta={delta(hot.purchases, base.purchases)} baseLabel={baseLabel} hotLabel={hotLabel} />
-        <CompareRow label="Por cada $1" base={base.roas}      hot={hot.roas}      fmt="roas"     delta={delta(hot.roas,      base.roas)}      baseLabel={baseLabel} hotLabel={hotLabel} />
-        <CompareRow label="CPA"         base={base.cpa}       hot={hot.cpa}       fmt="currency" delta={delta(hot.cpa,       base.cpa)}       baseLabel={baseLabel} hotLabel={hotLabel} invertColor />
+      <div className="grid grid-cols-12 gap-2 items-center pb-2 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+        <div className="col-span-4">Métrica</div>
+        <div className="col-span-3 text-right">{hotIsEmpty ? hotLabel : baseLabel}</div>
+        <div className="col-span-3 text-right">{hotIsEmpty ? baseLabel : hotLabel}</div>
+        <div className="col-span-2 text-right">vs</div>
+      </div>
+      <div className="space-y-2 text-sm pt-2">
+        <CompareRow label="Inversión"   base={base.spend}     hot={hot.spend}     fmt="currency" hotIsEmpty={hotIsEmpty} invertColor />
+        <CompareRow label="Ingresos"    base={base.revenue}   hot={hot.revenue}   fmt="currency" hotIsEmpty={hotIsEmpty} />
+        <CompareRow label="Compras"     base={base.purchases} hot={hot.purchases} fmt="number"   hotIsEmpty={hotIsEmpty} />
+        <CompareRow label="Por cada $1" base={base.roas}      hot={hot.roas}      fmt="roas"     hotIsEmpty={hotIsEmpty} />
+        <CompareRow label="CPA"         base={base.cpa}       hot={hot.cpa}       fmt="currency" hotIsEmpty={hotIsEmpty} invertColor />
       </div>
     </Card>
   );
 }
 
-function CompareRow({ label, base, hot, fmt, delta, baseLabel, hotLabel, invertColor = false }: {
+function CompareRow({ label, base, hot, fmt, hotIsEmpty, invertColor = false }: {
   label: string; base: number; hot: number;
   fmt: 'currency' | 'number' | 'roas';
-  delta: number; baseLabel: string; hotLabel: string; invertColor?: boolean;
+  hotIsEmpty: boolean;
+  invertColor?: boolean;
 }) {
   const fmtFn = fmt === 'currency' ? formatCurrency : fmt === 'number' ? formatNumber : (n: number) => `$${n.toFixed(2)}`;
+  const bothHaveData = base > 0 && hot > 0;
+  const delta = bothHaveData ? (hot - base) / base : 0;
   const isPositive = invertColor ? delta < 0 : delta > 0;
-  const colorClass = base === 0 && hot === 0
-    ? 'text-slate-400'
-    : isPositive ? 'text-emerald-700' : 'text-rose-700';
+
+  // Cuando Hot Week está vacío, la columna principal pasa a ser la Base
+  const leftValue  = hotIsEmpty ? hot : base;
+  const rightValue = hotIsEmpty ? base : hot;
+  const leftIsEmpty = hotIsEmpty && hot === 0;
+
   return (
     <div className="grid grid-cols-12 gap-2 items-center py-1.5 border-b border-slate-50 last:border-0">
       <div className="col-span-4 text-xs font-medium text-slate-500">{label}</div>
-      <div className="col-span-3 text-right text-xs text-slate-400 tabular-nums" title={baseLabel}>{fmtFn(base)}</div>
-      <div className="col-span-3 text-right text-sm font-bold text-slate-900 tabular-nums" title={hotLabel}>{fmtFn(hot)}</div>
-      <div className={cn("col-span-2 text-right text-xs font-bold tabular-nums", colorClass)}>
-        {delta >= 0 ? '+' : ''}{(delta * 100).toFixed(0)}%
+      <div className="col-span-3 text-right text-xs text-slate-400 tabular-nums">
+        {leftIsEmpty ? <span className="italic">—</span> : fmtFn(leftValue)}
+      </div>
+      <div className="col-span-3 text-right text-sm font-bold text-slate-900 tabular-nums">{fmtFn(rightValue)}</div>
+      <div className={cn("col-span-2 text-right text-xs font-bold tabular-nums",
+        bothHaveData ? (isPositive ? "text-emerald-700" : "text-rose-700") : "text-amber-700"
+      )}>
+        {bothHaveData ? `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(0)}%` : (hotIsEmpty ? 'pend.' : '—')}
       </div>
     </div>
   );
