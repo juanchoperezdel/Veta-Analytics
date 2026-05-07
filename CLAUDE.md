@@ -87,6 +87,38 @@ Sidebar (`src/components/layout/AppLayout.tsx`):
 8. **Estacionalidad** — heat-map día×hora + por día del mes + por fase del mes (Principio/Mitad/Fin) + por día semana, con DateRangePicker y selector Meta/Google/All
 9. **YouTube** — preservada pero con sync deshabilitado
 
+## Informes públicos (sin auth)
+
+Páginas standalone para mandar links directo al cliente, fuera del dashboard
+authenticated.
+
+### `/hot-sale-andesmar-2026` (`src/pages/HotSale.tsx` + `netlify/functions/hot-sale.ts`)
+
+Informe de un solo scroll para presentar al cliente Andesmar en el evento
+Hot Sale 2026. Sin login: el gate es por oscuridad — el path es específico
+y no está linkeado desde ningún lado. Si hay que revocar acceso se cambia
+el path en `App.tsx` y se redeploya.
+
+Tres secciones:
+1. **Semana base (4-10 may) vs Hot Week (11-17 may)** — KPIs hero (totales y
+   por canal Meta/Google), curva diaria 14d con franja resaltada, top rutas,
+   top creatives Meta con thumbnails, top search terms Google.
+2. **YoY Hot Week 2025 (12-18 may) vs 2026 (11-17 may)** — solo Meta + Google
+   total y por canal, sin breakdown por ruta (la data 2025 no está bien
+   etiquetada).
+3. **Heat-map hora×día Hot Week + lift sobre baseline 4 semanas previas +
+   demografía** (edad, género, región, placement de Meta).
+
+Fechas hardcodeadas como constantes en el endpoint. Para reusar el patrón
+con otro evento (Cyber Monday, Black Friday, etc.) crear nuevo archivo
+copiando la estructura.
+
+**UX time-locked**: cuando la Hot Week aún no empezó (todos los KPIs en 0),
+los cards y tablas detectan eso automáticamente y muestran la **semana base
+como protagonista** (es el dato vivo), con un badge ámbar "pendiente" en
+lugar del delta. Cuando arranca el evento y empieza a llegar data, vuelve
+solo a la presentación normal.
+
 ## Parser de rutas (`scripts/sync/parse-routes.ts`)
 
 Andesmar **no tiene e-commerce tracking en GA4** — `product_routes` está
