@@ -11,6 +11,7 @@ import Login from './pages/Login';
 import Pulse from './pages/Pulse';
 import Funnel from './pages/Funnel';
 import Seasonality from './pages/Seasonality';
+import HotSale from './pages/HotSale';
 import { getToken } from './lib/api';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -22,6 +23,7 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/hot-sale/:token" element={<HotSale />} />
         <Route path="/" element={<Navigate to="/andesmar/pulse" replace />} />
 
         <Route path="/:clientSlug" element={<RequireAuth><AppLayout /></RequireAuth>}>
