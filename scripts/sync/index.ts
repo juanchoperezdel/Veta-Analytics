@@ -129,6 +129,9 @@ async function getGoogleAccessToken(): Promise<string> {
 
 async function syncGoogleAds(clientId: string, customerId: string) {
   const accessToken = await getGoogleAccessToken();
+  // BETWEEN explícito en lugar de LAST_30_DAYS para incluir el día corriente
+  // (LAST_*_DAYS de Google Ads API excluye TODAY, dejando 24h de delay).
+  const { since, until } = dateRange(30);
 
   const query = `
     SELECT
@@ -138,7 +141,7 @@ async function syncGoogleAds(clientId: string, customerId: string) {
       metrics.ctr, metrics.average_cpc,
       metrics.conversions, metrics.conversions_value
     FROM campaign
-    WHERE segments.date DURING LAST_30_DAYS
+    WHERE segments.date BETWEEN '${since}' AND '${until}'
       AND metrics.cost_micros > 0
     ORDER BY segments.date DESC, metrics.cost_micros DESC
   `;
@@ -196,6 +199,7 @@ async function syncGoogleAds(clientId: string, customerId: string) {
 
 async function syncYouTube(clientId: string, customerId: string) {
   const accessToken = await getGoogleAccessToken();
+  const { since, until } = dateRange(30);
 
   const query = `
     SELECT
@@ -206,7 +210,7 @@ async function syncYouTube(clientId: string, customerId: string) {
       metrics.cost_micros, metrics.impressions, metrics.clicks,
       metrics.ctr, metrics.all_conversions, metrics.all_conversions_value
     FROM ad_group_ad
-    WHERE segments.date DURING LAST_30_DAYS
+    WHERE segments.date BETWEEN '${since}' AND '${until}'
       AND campaign.advertising_channel_type = 'VIDEO'
       AND metrics.cost_micros > 0
     ORDER BY segments.date DESC, metrics.cost_micros DESC
@@ -264,6 +268,7 @@ async function syncYouTube(clientId: string, customerId: string) {
 
 async function syncGoogleAdsSearchTerms(clientId: string, customerId: string) {
   const accessToken = await getGoogleAccessToken();
+  const { since, until } = dateRange(30);
 
   const query = `
     SELECT
@@ -272,7 +277,7 @@ async function syncGoogleAdsSearchTerms(clientId: string, customerId: string) {
       metrics.clicks, metrics.impressions, metrics.cost_micros,
       metrics.conversions, metrics.conversions_value
     FROM search_term_view
-    WHERE segments.date DURING LAST_30_DAYS
+    WHERE segments.date BETWEEN '${since}' AND '${until}'
       AND metrics.impressions > 0
     ORDER BY segments.date DESC, metrics.clicks DESC
   `;
@@ -549,6 +554,7 @@ async function syncMetaHourly(clientId: string, adAccountId: string, accessToken
 
 async function syncGoogleAdsHourly(clientId: string, customerId: string) {
   const accessToken = await getGoogleAccessToken();
+  const { since, until } = dateRange(14);
 
   const query = `
     SELECT
@@ -557,7 +563,7 @@ async function syncGoogleAdsHourly(clientId: string, customerId: string) {
       metrics.cost_micros, metrics.impressions, metrics.clicks,
       metrics.conversions, metrics.conversions_value
     FROM customer
-    WHERE segments.date DURING LAST_14_DAYS
+    WHERE segments.date BETWEEN '${since}' AND '${until}'
   `;
 
   const res = await fetch(
