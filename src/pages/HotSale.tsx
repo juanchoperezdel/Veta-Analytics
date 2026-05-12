@@ -523,20 +523,25 @@ function DailyCurveChart({ daily, hotWeek }: { daily: DailyPoint[]; hotWeek: { s
   return (
     <div className="h-72">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+        <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
           <ReferenceArea x1={chartData.find(d => d.date === hotWeek.start)?.dateLabel}
                          x2={chartData.find(d => d.date === hotWeek.end)?.dateLabel}
                          fill="#fb923c" fillOpacity={0.08} label={{ value: 'Hot Week', position: 'insideTop', fill: '#c2410c', fontSize: 11, fontWeight: 600 }} />
           <XAxis dataKey="dateLabel" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
-          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCompact(v)} />
+          <YAxis yAxisId="money" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCompact(v)} />
+          <YAxis yAxisId="purchases" orientation="right" tick={{ fontSize: 11, fill: '#8b5cf6' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatNumber(v)} />
           <Tooltip
-            formatter={(value: number, name: string) => [formatCurrency(value), name === 'revenue' ? 'Ingresos' : name === 'spend' ? 'Inversión' : name]}
+            formatter={(value: number, name: string) => {
+              if (name === 'Compras') return [formatNumber(value), name];
+              return [formatCurrency(value), name];
+            }}
             labelFormatter={(label) => `Día ${label}`}
             contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Line type="monotone" dataKey="revenue" name="Ingresos" stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-          <Line type="monotone" dataKey="spend"   name="Inversión" stroke="#f97316" strokeWidth={2}   dot={{ r: 2 }} />
+          <Line yAxisId="money"     type="monotone" dataKey="revenue"   name="Ingresos"  stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+          <Line yAxisId="money"     type="monotone" dataKey="spend"     name="Inversión" stroke="#f97316" strokeWidth={2}   dot={{ r: 2 }} />
+          <Line yAxisId="purchases" type="monotone" dataKey="purchases" name="Compras"   stroke="#8b5cf6" strokeWidth={2}   dot={{ r: 2 }} strokeDasharray="4 2" />
         </LineChart>
       </ResponsiveContainer>
     </div>
