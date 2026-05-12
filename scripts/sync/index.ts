@@ -681,7 +681,11 @@ async function syncGA4(clientId: string, propertyId: string) {
     `;
   }
 
-  // Rutas diarias (e-commerce items)
+  // Rutas diarias (e-commerce items).
+  // GA4 NO permite combinar métricas de evento (transactions, addToCarts) con
+  // métricas item-level (itemRevenue, itemsPurchased) en el mismo runReport.
+  // Solo pedimos las item-level — alcanza para ranking de rutas por revenue.
+  // purchases queda = itemsPurchased (a nivel item, "cantidad de ese item vendida").
   const routesRes = await fetch(
     `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
     {
@@ -693,15 +697,16 @@ async function syncGA4(clientId: string, propertyId: string) {
         metrics: [
           { name: 'itemRevenue' },
           { name: 'itemsPurchased' },
-          { name: 'transactions' },
-          { name: 'addToCarts' },
         ],
         orderBys: [{ dimension: { dimensionName: 'date' } }],
-        limit: 2000,
+        limit: 10000,
       }),
     }
   );
   const routesData = await routesRes.json();
+  if (routesData.error) {
+    console.error(`  ✗ GA4 routes query error: ${routesData.error.message}`);
+  }
 
   for (const row of routesData.rows ?? []) {
     const date    = ga4DateToISO(row.dimensionValues[0].value);
@@ -709,18 +714,16 @@ async function syncGA4(clientId: string, propertyId: string) {
     const m       = row.metricValues;
     const revenue   = parseFloat(m[0].value ?? '0');
     const articles  = parseInt(m[1].value ?? '0');
-    const purchases = parseInt(m[2].value ?? '0');
-    const addToCart = parseInt(m[3].value ?? '0');
 
     await sql`
       INSERT INTO product_routes
         (client_id, snapshot_date, route, revenue, articles, purchases, add_to_cart)
       VALUES
-        (${clientId}, ${date}, ${route}, ${revenue}, ${articles}, ${purchases}, ${addToCart})
+        (${clientId}, ${date}, ${route}, ${revenue}, ${articles}, ${articles}, 0)
       ON CONFLICT (client_id, snapshot_date, route)
       DO UPDATE SET
         revenue = EXCLUDED.revenue, articles = EXCLUDED.articles,
-        purchases = EXCLUDED.purchases, add_to_cart = EXCLUDED.add_to_cart, synced_at = NOW()
+        purchases = EXCLUDED.purchases, synced_at = NOW()
     `;
   }
 
