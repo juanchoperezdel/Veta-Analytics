@@ -122,43 +122,6 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  // ─── Top rutas en un rango (Meta + Google combinados) ────────────────────
-  async function topRoutes(start: string, end: string, limit = 12) {
-    const rows = await sql`
-      SELECT route,
-             SUM(spend)::numeric    AS spend,
-             SUM(revenue)::numeric  AS revenue,
-             SUM(purchases)::bigint AS purchases
-      FROM (
-        SELECT route, spend, revenue, purchases FROM meta_ads_campaigns
-        WHERE client_id = ${clientId} AND route IS NOT NULL
-          AND snapshot_date BETWEEN ${start} AND ${end}
-        UNION ALL
-        SELECT route, spend, revenue, carts AS purchases FROM google_ads_campaigns
-        WHERE client_id = ${clientId} AND route IS NOT NULL
-          AND snapshot_date BETWEEN ${start} AND ${end}
-      ) AS combined
-      WHERE route IS NOT NULL
-      GROUP BY route
-      HAVING SUM(spend) > 0
-      ORDER BY SUM(revenue) DESC
-      LIMIT ${limit}
-    `;
-    return rows.map((r: any) => {
-      const spend = Number(r.spend ?? 0);
-      const revenue = Number(r.revenue ?? 0);
-      const purchases = Number(r.purchases ?? 0);
-      return {
-        route: r.route,
-        spend,
-        revenue,
-        purchases,
-        roas: spend > 0 ? revenue / spend : 0,
-        cpa:  purchases > 0 ? spend / purchases : 0,
-      };
-    });
-  }
-
   // ─── Top creatives Meta durante la Hot Week ────────────────────────────
   async function topCreatives() {
     const rows = await sql`
@@ -204,39 +167,62 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  // ─── Top search terms Google Ads durante la Hot Week ───────────────────
-  async function topSearchTerms() {
-    const rows = await sql`
-      SELECT search_term, route,
-             SUM(clicks)::bigint        AS clicks,
-             SUM(impressions)::bigint   AS impressions,
-             SUM(cost)::numeric         AS cost,
-             SUM(conversions)::numeric  AS conversions,
-             SUM(conv_value)::numeric   AS conv_value
-      FROM google_ads_search_terms
-      WHERE client_id = ${clientId}
-        AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
-      GROUP BY search_term, route
-      HAVING SUM(impressions) > 0
-      ORDER BY SUM(conversions) DESC, SUM(impressions) DESC
-      LIMIT 25
-    `;
-    return rows.map((r: any) => {
-      const cost = Number(r.cost ?? 0);
-      const conv = Number(r.conversions ?? 0);
-      const cv   = Number(r.conv_value ?? 0);
+  // ─── Top campañas (Meta + Google) durante la Hot Week ──────────────────
+  async function topCampaigns() {
+    // Meta: agregamos por campaign_name desde meta_ads_creatives (que tiene
+    // el nombre). Solo cubre top 60 ads por spend pero suele ser representativo.
+    const [metaRows, googleRows] = await Promise.all([
+      sql`
+        SELECT campaign_name AS name,
+               SUM(spend)::numeric        AS spend,
+               SUM(revenue)::numeric      AS revenue,
+               SUM(purchases)::bigint     AS purchases,
+               SUM(impressions)::bigint   AS impressions,
+               SUM(clicks)::bigint        AS clicks
+        FROM meta_ads_creatives
+        WHERE client_id = ${clientId}
+          AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+          AND campaign_name IS NOT NULL
+        GROUP BY campaign_name
+        HAVING SUM(spend) > 0
+      `,
+      sql`
+        SELECT name,
+               SUM(spend)::numeric        AS spend,
+               SUM(revenue)::numeric      AS revenue,
+               SUM(carts)::bigint         AS purchases,
+               SUM(impressions)::bigint   AS impressions,
+               SUM(clicks)::bigint        AS clicks
+        FROM google_ads_campaigns
+        WHERE client_id = ${clientId}
+          AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+          AND name IS NOT NULL
+        GROUP BY name
+        HAVING SUM(spend) > 0
+      `,
+    ]);
+
+    function pack(r: any, channel: 'Meta' | 'Google') {
+      const spend = Number(r.spend ?? 0);
+      const revenue = Number(r.revenue ?? 0);
+      const purchases = Number(r.purchases ?? 0);
       return {
-        term: r.search_term,
-        route: r.route,
-        clicks: Number(r.clicks ?? 0),
+        name: r.name,
+        channel,
+        spend,
+        revenue,
+        purchases,
         impressions: Number(r.impressions ?? 0),
-        cost,
-        conversions: conv,
-        convValue: cv,
-        roas: cost > 0 ? cv / cost : 0,
-        cpa:  conv > 0 ? cost / conv : 0,
+        clicks: Number(r.clicks ?? 0),
+        roas: spend > 0 ? revenue / spend : 0,
+        cpa:  purchases > 0 ? spend / purchases : 0,
       };
-    });
+    }
+    const all = [
+      ...metaRows.map((r: any) => pack(r, 'Meta')),
+      ...googleRows.map((r: any) => pack(r, 'Google')),
+    ];
+    return all.sort((a, b) => b.revenue - a.revenue).slice(0, 15);
   }
 
   // ─── Heat-map hora×día durante la Hot Week (Meta + Google combinados) ──
@@ -333,10 +319,8 @@ export default async (req: Request, _context: Context) => {
     hotWeekKpis,
     hs2025Kpis,
     daily,
-    routesHotWeek,
-    routesBase,
     creatives,
-    searchTerms,
+    campaigns,
     heatmapData,
     demo,
   ] = await Promise.all([
@@ -344,10 +328,8 @@ export default async (req: Request, _context: Context) => {
     kpisInRange(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
     kpisInRange(HOT_WEEK_2025.start, HOT_WEEK_2025.end),
     dailyCurve(),
-    topRoutes(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
-    topRoutes(BASE_WEEK_2026.start, BASE_WEEK_2026.end),
     topCreatives(),
-    topSearchTerms(),
+    topCampaigns(),
     heatmap(),
     demographics(),
   ]);
@@ -373,9 +355,8 @@ export default async (req: Request, _context: Context) => {
       base: baseKpis,
       hotWeek: hotWeekKpis,
       daily,
-      routes: { hotWeek: routesHotWeek, base: routesBase },
       creatives,
-      searchTerms,
+      campaigns,
     },
     yoy: {
       hs2025: hs2025Kpis,

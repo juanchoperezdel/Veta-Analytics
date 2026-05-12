@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  ArrowUpRight, ArrowDownRight, Flame,
-  MapPin, Users, Smartphone, Search, Image as ImageIcon, Clock,
+  ArrowUpRight, ArrowDownRight, Flame, TrendingUp,
+  MapPin, Users, Smartphone, Image as ImageIcon, Clock,
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceArea as RechartsReferenceArea, Legend } from 'recharts';
 
@@ -26,15 +26,16 @@ type DailyPoint = {
   metaSpend: number; metaRevenue: number; googleSpend: number; googleRevenue: number;
   isHotWeek: boolean;
 };
-type Route = { route: string; spend: number; revenue: number; purchases: number; roas: number; cpa: number };
+type Campaign = {
+  name: string; channel: 'Meta' | 'Google';
+  spend: number; revenue: number; purchases: number;
+  impressions: number; clicks: number;
+  roas: number; cpa: number;
+};
 type Creative = {
   adId: string; adName: string; campaignName: string; thumbnailUrl: string | null;
   status: string; spend: number; impressions: number; clicks: number; purchases: number;
   revenue: number; roas: number; cpa: number; ctr: number;
-};
-type SearchTerm = {
-  term: string; route: string | null; clicks: number; impressions: number;
-  cost: number; conversions: number; convValue: number; roas: number; cpa: number;
 };
 type HeatCell = { dow: number; hour: number; dayLabel: string; spend: number; purchases: number; revenue: number; roas: number };
 type DemoItem = { value: string; spend: number; impressions: number; reach: number; purchases: number; revenue: number; roas: number; cpa: number };
@@ -50,9 +51,8 @@ type HotSaleData = {
     base:    RangeKpis;
     hotWeek: RangeKpis;
     daily:   DailyPoint[];
-    routes:  { hotWeek: Route[]; base: Route[] };
     creatives: Creative[];
-    searchTerms: SearchTerm[];
+    campaigns: Campaign[];
   };
   yoy: {
     hs2025: RangeKpis;
@@ -185,18 +185,6 @@ function Report({ data }: { data: HotSaleData }) {
             <DailyCurveChart daily={weekly.daily} hotWeek={config.hotWeek} />
           </Card>
 
-          {/* Top rutas / destinos */}
-          <Card className="p-6">
-            <div className="mb-4 flex items-center gap-2">
-              <MapPin size={18} className="text-slate-500" />
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Top destinos durante la Hot Week</h3>
-                <p className="text-xs text-slate-500 mt-1">Rutas con más ingresos durante el evento (Meta + Google combinados)</p>
-              </div>
-            </div>
-            <RoutesTable routes={weekly.routes.hotWeek} baseRoutes={weekly.routes.base} />
-          </Card>
-
           {/* Top creatives Meta */}
           <Card className="p-6">
             <div className="mb-4 flex items-center gap-2">
@@ -209,16 +197,16 @@ function Report({ data }: { data: HotSaleData }) {
             <CreativesGrid creatives={weekly.creatives} />
           </Card>
 
-          {/* Top search terms Google */}
+          {/* Top campañas (Meta + Google) */}
           <Card className="p-6">
             <div className="mb-4 flex items-center gap-2">
-              <Search size={18} className="text-slate-500" />
+              <TrendingUp size={18} className="text-slate-500" />
               <div>
-                <h3 className="text-base font-bold text-slate-900">Búsquedas más relevantes — Google Ads</h3>
-                <p className="text-xs text-slate-500 mt-1">Queries que activaron tus ads y convirtieron durante el Hot Sale</p>
+                <h3 className="text-base font-bold text-slate-900">Campañas que más vendieron — Hot Week</h3>
+                <p className="text-xs text-slate-500 mt-1">Top campañas Meta + Google ordenadas por revenue durante el evento</p>
               </div>
             </div>
-            <SearchTermsTable terms={weekly.searchTerms} />
+            <CampaignsTable campaigns={weekly.campaigns} />
           </Card>
         </section>
 
@@ -523,56 +511,12 @@ function DailyCurveChart({ daily, hotWeek }: { daily: DailyPoint[]; hotWeek: { s
   );
 }
 
-function RoutesTable({ routes, baseRoutes }: { routes: Route[]; baseRoutes: Route[] }) {
-  if (routes.length === 0) {
-    return <div className="py-8 text-center text-sm text-slate-400">Aún no hay rutas con datos durante la Hot Week.</div>;
-  }
-  const baseMap = new Map(baseRoutes.map(r => [r.route, r]));
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase">
-            <th className="text-left py-2 font-semibold">Ruta / destino</th>
-            <th className="text-right py-2 font-semibold">Inversión</th>
-            <th className="text-right py-2 font-semibold">Ingresos</th>
-            <th className="text-right py-2 font-semibold">Compras</th>
-            <th className="text-right py-2 font-semibold">Por $1</th>
-            <th className="text-right py-2 font-semibold">vs base</th>
-          </tr>
-        </thead>
-        <tbody>
-          {routes.map(r => {
-            const base = baseMap.get(r.route);
-            const baseRev = base?.revenue ?? 0;
-            const delta = baseRev > 0 ? (r.revenue - baseRev) / baseRev : (r.revenue > 0 ? 1 : 0);
-            return (
-              <tr key={r.route} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-                <td className="py-2.5 font-medium text-slate-800">{r.route}</td>
-                <td className="py-2.5 text-right tabular-nums text-slate-600">{formatCurrency(r.spend)}</td>
-                <td className="py-2.5 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(r.revenue)}</td>
-                <td className="py-2.5 text-right tabular-nums text-slate-600">{formatNumber(r.purchases)}</td>
-                <td className={cn("py-2.5 text-right tabular-nums font-bold",
-                  r.roas >= 3 ? "text-emerald-700" : r.roas >= 1.5 ? "text-amber-700" : "text-orange-700"
-                )}>${r.roas.toFixed(2)}</td>
-                <td className={cn("py-2.5 text-right tabular-nums text-xs font-bold",
-                  delta >= 0 ? "text-emerald-600" : "text-rose-600"
-                )}>{delta >= 0 ? '+' : ''}{(delta * 100).toFixed(0)}%</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function CreativesGrid({ creatives }: { creatives: Creative[] }) {
   if (creatives.length === 0) {
     return <div className="py-8 text-center text-sm text-slate-400">Aún no hay creatives con data en la Hot Week.</div>;
   }
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-2">
       {creatives.map(c => (
         <div key={c.adId} className="border border-slate-100 rounded-lg overflow-hidden bg-white hover:shadow-md transition-shadow">
           <div className="aspect-square bg-slate-100 relative">
@@ -580,11 +524,11 @@ function CreativesGrid({ creatives }: { creatives: Creative[] }) {
               <img src={c.thumbnailUrl} alt={c.adName} className="w-full h-full object-cover" loading="lazy" />
             ) : (
               <div className="w-full h-full flex items-center justify-center text-slate-300">
-                <ImageIcon size={32} />
+                <ImageIcon size={24} />
               </div>
             )}
             <div className={cn(
-              "absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase",
+              "absolute top-1 right-1 text-[9px] font-bold px-1 py-0.5 rounded",
               c.roas >= 3 ? "bg-emerald-500 text-white" :
               c.roas >= 1.5 ? "bg-amber-500 text-white" :
               "bg-slate-700 text-white"
@@ -592,15 +536,15 @@ function CreativesGrid({ creatives }: { creatives: Creative[] }) {
               ${c.roas.toFixed(1)}x
             </div>
           </div>
-          <div className="p-3">
-            <div className="text-xs font-semibold text-slate-900 line-clamp-2 mb-1" title={c.adName}>
+          <div className="p-2">
+            <div className="text-[11px] font-semibold text-slate-900 line-clamp-2 mb-1 leading-tight" title={c.adName}>
               {c.adName || 'Sin nombre'}
             </div>
-            <div className="text-[10px] text-slate-400 line-clamp-1 mb-2" title={c.campaignName}>
+            <div className="text-[9px] text-slate-400 line-clamp-1 mb-1 leading-tight" title={c.campaignName}>
               {c.campaignName}
             </div>
-            <div className="flex justify-between text-[10px] text-slate-500 pt-2 border-t border-slate-50">
-              <span>{formatCompact(c.revenue)} · {formatNumber(c.purchases)} compras</span>
+            <div className="text-[9px] text-slate-500 pt-1.5 border-t border-slate-50 leading-tight">
+              {formatCompact(c.revenue)} · {formatNumber(c.purchases)} compras
             </div>
           </div>
         </div>
@@ -609,36 +553,38 @@ function CreativesGrid({ creatives }: { creatives: Creative[] }) {
   );
 }
 
-function SearchTermsTable({ terms }: { terms: SearchTerm[] }) {
-  if (terms.length === 0) {
-    return <div className="py-8 text-center text-sm text-slate-400">Aún no hay queries con data en la Hot Week.</div>;
+function CampaignsTable({ campaigns }: { campaigns: Campaign[] }) {
+  if (campaigns.length === 0) {
+    return <div className="py-8 text-center text-sm text-slate-400">Aún no hay campañas con data en la Hot Week.</div>;
   }
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase">
-            <th className="text-left py-2 font-semibold">Búsqueda</th>
-            <th className="text-left py-2 font-semibold">Ruta</th>
-            <th className="text-right py-2 font-semibold">Imp.</th>
-            <th className="text-right py-2 font-semibold">Clicks</th>
-            <th className="text-right py-2 font-semibold">Conv.</th>
-            <th className="text-right py-2 font-semibold">Costo</th>
+            <th className="text-left py-2 font-semibold">Campaña</th>
+            <th className="text-left py-2 font-semibold">Canal</th>
+            <th className="text-right py-2 font-semibold">Inversión</th>
+            <th className="text-right py-2 font-semibold">Ingresos</th>
+            <th className="text-right py-2 font-semibold">Compras</th>
             <th className="text-right py-2 font-semibold">Por $1</th>
           </tr>
         </thead>
         <tbody>
-          {terms.map((t, i) => (
+          {campaigns.map((c, i) => (
             <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-              <td className="py-2 font-medium text-slate-800 max-w-xs truncate" title={t.term}>{t.term}</td>
-              <td className="py-2 text-xs text-slate-500">{t.route ?? '—'}</td>
-              <td className="py-2 text-right tabular-nums text-slate-600">{formatNumber(t.impressions)}</td>
-              <td className="py-2 text-right tabular-nums text-slate-600">{formatNumber(t.clicks)}</td>
-              <td className="py-2 text-right tabular-nums font-semibold text-slate-900">{t.conversions.toFixed(1)}</td>
-              <td className="py-2 text-right tabular-nums text-slate-600">{formatCurrency(t.cost)}</td>
+              <td className="py-2 font-medium text-slate-800 max-w-md truncate" title={c.name}>{c.name}</td>
+              <td className="py-2">
+                <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded uppercase",
+                  c.channel === 'Meta' ? "text-blue-700 bg-blue-50" : "text-emerald-700 bg-emerald-50"
+                )}>{c.channel}</span>
+              </td>
+              <td className="py-2 text-right tabular-nums text-slate-600">{formatCurrency(c.spend)}</td>
+              <td className="py-2 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(c.revenue)}</td>
+              <td className="py-2 text-right tabular-nums text-slate-600">{formatNumber(c.purchases)}</td>
               <td className={cn("py-2 text-right tabular-nums font-bold",
-                t.roas >= 3 ? "text-emerald-700" : t.roas >= 1.5 ? "text-amber-700" : t.roas > 0 ? "text-orange-700" : "text-slate-400"
-              )}>{t.roas > 0 ? `$${t.roas.toFixed(2)}` : '—'}</td>
+                c.roas >= 3 ? "text-emerald-700" : c.roas >= 1.5 ? "text-amber-700" : c.roas > 0 ? "text-orange-700" : "text-slate-400"
+              )}>{c.roas > 0 ? `$${c.roas.toFixed(2)}` : '—'}</td>
             </tr>
           ))}
         </tbody>

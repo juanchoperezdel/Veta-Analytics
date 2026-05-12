@@ -101,14 +101,22 @@ el path en `App.tsx` y se redeploya.
 
 Tres secciones:
 1. **Semana base (4-10 may) vs Hot Week (11-17 may)** — KPIs hero (totales y
-   por canal Meta/Google), curva diaria 14d con franja resaltada, top rutas,
-   top creatives Meta con thumbnails, top search terms Google.
+   por canal Meta/Google), curva diaria 14d con franja resaltada (ingresos
+   + inversión + compras en doble eje), top creatives Meta con thumbnails,
+   y **top campañas Meta+Google por revenue**.
 2. **YoY Hot Week 2025 (12-18 may) vs 2026 (11-17 may)** — solo Meta + Google
    total y por canal, sin breakdown por ruta (la data 2025 no está bien
    etiquetada).
 3. **Heat-map hora×día Hot Week + demografía** (edad, género, región,
-   placement de Meta). El "lift sobre baseline 4 semanas" se sacó el
-   2026-05-11 — ver detalle en `ROADMAP.md` sección "Sacado intencionalmente".
+   placement de Meta).
+
+**Sacado intencionalmente** (ver `ROADMAP.md` para detalle):
+- "Top destinos" — la inferencia desde nombre de campaña no refleja la
+  venta real. Requiere ecommerce tracking en GA4 para mostrarse bien.
+- "Búsquedas Google" — Andesmar tiene ~100% brand search, no agrega para
+  presentar al cliente.
+- "Lift sobre baseline 4 semanas" — métrica engañosa mientras el evento
+  está en curso.
 
 Fechas hardcodeadas como constantes en el endpoint. Para reusar el patrón
 con otro evento (Cyber Monday, Black Friday, etc.) crear nuevo archivo

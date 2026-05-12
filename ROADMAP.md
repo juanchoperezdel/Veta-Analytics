@@ -202,6 +202,55 @@ Cargar el budget mensual desde el dashboard: pestaña **Pulso** → card "Pacing
 
 ## Sacado intencionalmente — por si vuelve
 
+### "Top destinos" en el informe Hot Sale (sacado 2026-05-11)
+
+Era una tabla en la Sección 1 del informe `/hot-sale-andesmar-2026` que
+listaba las rutas/destinos con más ingresos durante la Hot Week, inferidas
+por el parser de rutas (`scripts/sync/parse-routes.ts`) que matchea tokens
+del nombre de campaña a un destino canónico.
+
+**Por qué se sacó**:
+- La data no es confiable. La "ruta" se infiere del **nombre de la campaña**,
+  no del **producto comprado**. Una persona puede ver un ad de la campaña
+  "Mendoza" y terminar comprando "Buenos Aires" — el spend queda asignado
+  a Mendoza pero la venta real es otra ruta.
+- El cliente comparó con sus dashboards de Analytics y los números no
+  cuadran. Mostrarle algo incorrecto en un informe oficial mina la
+  credibilidad de todo el dashboard.
+
+**Cómo volver a meterlo**:
+- Necesitaríamos ecommerce tracking en GA4 (la tabla `product_routes` para
+  poblarse), o un export del back de Andesmar con las ventas por ruta.
+- Mientras no tengamos esa fuente, la "ruta inferida de campaña" sirve
+  para análisis interno (cómo distribuimos el spend) pero NO para
+  presentarle al cliente como "qué rutas vendieron más".
+- En `netlify/functions/hot-sale.ts`: la función `topRoutes()` y sus dos
+  llamadas en el `Promise.all` se borraron. Buscar git blame del archivo
+  para recuperar el código.
+- En `src/pages/HotSale.tsx`: el bloque JSX y el componente `RoutesTable`
+  también se borraron.
+
+### "Búsquedas más relevantes (Google Ads)" en el informe Hot Sale (sacado 2026-05-11)
+
+Era una tabla con los top queries de Google Ads que activaron los ads
+durante la Hot Week, ordenadas por conversiones.
+
+**Por qué se sacó**:
+- En Andesmar, casi el 100% de las top queries son brand ("andesmar",
+  "andesmar pasajes", "andesmar mendoza", etc.). Mostrarle al cliente
+  que la mayoría del search es brand puede leerse como "Google Ads solo
+  está capturando demanda existente" — info técnicamente correcta pero
+  mala como presentación.
+
+**Reemplazada por**: tabla "Campañas que más vendieron" (Meta + Google
+combinadas, ordenadas por revenue).
+
+**Cómo volver a meterlo** si querés mostrarla en algún momento:
+- Filtrar para excluir queries que contengan "andesmar" (sería mostrar
+  demanda no-brand).
+- En `netlify/functions/hot-sale.ts`: la función `topSearchTerms()` se
+  borró. Buscar git blame para recuperar el código.
+
 ### "Lift sobre el baseline" en el informe Hot Sale (sacado 2026-05-11)
 
 Era un card en la Sección 3 del informe `/hot-sale-andesmar-2026` que comparaba
