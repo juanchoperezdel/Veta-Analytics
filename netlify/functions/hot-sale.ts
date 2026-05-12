@@ -123,20 +123,37 @@ export default async (req: Request, _context: Context) => {
   }
 
   // ─── Top rutas vendidas (GA4 product_routes, data REAL no inferida) ─────
-  async function topRoutes(start: string, end: string, limit = 12) {
-    const rows = await sql`
-      SELECT route,
-             SUM(revenue)::numeric   AS revenue,
-             SUM(articles)::bigint   AS items,
-             SUM(purchases)::bigint  AS purchases
-      FROM product_routes
-      WHERE client_id = ${clientId}
-        AND snapshot_date BETWEEN ${start} AND ${end}
-      GROUP BY route
-      HAVING SUM(revenue) > 0
-      ORDER BY SUM(revenue) DESC
-      LIMIT ${limit}
-    `;
+  // Hot Week: top 50 por revenue para que el frontend pueda reordenar por
+  // distintos criterios (pasajes, delta vs base, etc.) sin perder data.
+  // Base: TODAS las rutas con revenue > 0 — el frontend la usa como mapa
+  // para calcular el delta de cada ruta del Hot Week sin que aparezca como
+  // "nueva" cuando en realidad sí tuvo data en la base.
+  async function topRoutes(start: string, end: string, limit: number | null = 50) {
+    const rows = limit !== null
+      ? await sql`
+          SELECT route,
+                 SUM(revenue)::numeric   AS revenue,
+                 SUM(articles)::bigint   AS items,
+                 SUM(purchases)::bigint  AS purchases
+          FROM product_routes
+          WHERE client_id = ${clientId}
+            AND snapshot_date BETWEEN ${start} AND ${end}
+          GROUP BY route
+          HAVING SUM(revenue) > 0
+          ORDER BY SUM(revenue) DESC
+          LIMIT ${limit}
+        `
+      : await sql`
+          SELECT route,
+                 SUM(revenue)::numeric   AS revenue,
+                 SUM(articles)::bigint   AS items,
+                 SUM(purchases)::bigint  AS purchases
+          FROM product_routes
+          WHERE client_id = ${clientId}
+            AND snapshot_date BETWEEN ${start} AND ${end}
+          GROUP BY route
+          HAVING SUM(revenue) > 0
+        `;
     return rows.map((r: any) => ({
       route:     r.route,
       revenue:   Number(r.revenue ?? 0),
@@ -353,8 +370,8 @@ export default async (req: Request, _context: Context) => {
     kpisInRange(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
     kpisInRange(HOT_WEEK_2025.start, HOT_WEEK_2025.end),
     dailyCurve(),
-    topRoutes(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
-    topRoutes(BASE_WEEK_2026.start, BASE_WEEK_2026.end),
+    topRoutes(HOT_WEEK_2026.start, HOT_WEEK_2026.end, 50),
+    topRoutes(BASE_WEEK_2026.start, BASE_WEEK_2026.end, null),
     topCreatives(),
     topCampaigns(),
     heatmap(),
