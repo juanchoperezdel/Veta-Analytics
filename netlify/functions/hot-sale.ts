@@ -122,6 +122,29 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
+  // ─── Top rutas vendidas (GA4 product_routes, data REAL no inferida) ─────
+  async function topRoutes(start: string, end: string, limit = 12) {
+    const rows = await sql`
+      SELECT route,
+             SUM(revenue)::numeric   AS revenue,
+             SUM(articles)::bigint   AS items,
+             SUM(purchases)::bigint  AS purchases
+      FROM product_routes
+      WHERE client_id = ${clientId}
+        AND snapshot_date BETWEEN ${start} AND ${end}
+      GROUP BY route
+      HAVING SUM(revenue) > 0
+      ORDER BY SUM(revenue) DESC
+      LIMIT ${limit}
+    `;
+    return rows.map((r: any) => ({
+      route:     r.route,
+      revenue:   Number(r.revenue ?? 0),
+      items:     Number(r.items ?? 0),
+      purchases: Number(r.purchases ?? 0),
+    }));
+  }
+
   // ─── Top creatives Meta durante la Hot Week ────────────────────────────
   async function topCreatives() {
     const rows = await sql`
@@ -319,6 +342,8 @@ export default async (req: Request, _context: Context) => {
     hotWeekKpis,
     hs2025Kpis,
     daily,
+    routesHotWeek,
+    routesBase,
     creatives,
     campaigns,
     heatmapData,
@@ -328,6 +353,8 @@ export default async (req: Request, _context: Context) => {
     kpisInRange(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
     kpisInRange(HOT_WEEK_2025.start, HOT_WEEK_2025.end),
     dailyCurve(),
+    topRoutes(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
+    topRoutes(BASE_WEEK_2026.start, BASE_WEEK_2026.end),
     topCreatives(),
     topCampaigns(),
     heatmap(),
@@ -355,6 +382,7 @@ export default async (req: Request, _context: Context) => {
       base: baseKpis,
       hotWeek: hotWeekKpis,
       daily,
+      routes: { hotWeek: routesHotWeek, base: routesBase },
       creatives,
       campaigns,
     },

@@ -26,6 +26,7 @@ type DailyPoint = {
   metaSpend: number; metaRevenue: number; googleSpend: number; googleRevenue: number;
   isHotWeek: boolean;
 };
+type Route = { route: string; revenue: number; items: number; purchases: number };
 type Campaign = {
   name: string; channel: 'Meta' | 'Google';
   spend: number; revenue: number; purchases: number;
@@ -51,6 +52,7 @@ type HotSaleData = {
     base:    RangeKpis;
     hotWeek: RangeKpis;
     daily:   DailyPoint[];
+    routes:  { hotWeek: Route[]; base: Route[] };
     creatives: Creative[];
     campaigns: Campaign[];
   };
@@ -183,6 +185,18 @@ function Report({ data }: { data: HotSaleData }) {
               <p className="text-xs text-slate-500 mt-1">Ingresos por día. La franja resaltada es la Hot Week.</p>
             </div>
             <DailyCurveChart daily={weekly.daily} hotWeek={config.hotWeek} />
+          </Card>
+
+          {/* Top rutas / destinos (data REAL de GA4) */}
+          <Card className="p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <MapPin size={18} className="text-slate-500" />
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Top destinos vendidos durante la Hot Week</h3>
+                <p className="text-xs text-slate-500 mt-1">Rutas con más revenue según Google Analytics (data real de ecommerce, no inferida)</p>
+              </div>
+            </div>
+            <RoutesTable routes={weekly.routes.hotWeek} baseRoutes={weekly.routes.base} />
           </Card>
 
           {/* Top creatives Meta */}
@@ -507,6 +521,49 @@ function DailyCurveChart({ daily, hotWeek }: { daily: DailyPoint[]; hotWeek: { s
           <Line yAxisId="purchases" type="monotone" dataKey="purchases" name="Compras"   stroke="#8b5cf6" strokeWidth={2}   dot={{ r: 2 }} strokeDasharray="4 2" />
         </LineChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+function RoutesTable({ routes, baseRoutes }: { routes: Route[]; baseRoutes: Route[] }) {
+  if (routes.length === 0) {
+    return <div className="py-8 text-center text-sm text-slate-400">Aún no hay rutas vendidas durante la Hot Week.</div>;
+  }
+  const baseMap = new Map(baseRoutes.map(r => [r.route, r]));
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase">
+            <th className="text-left py-2 font-semibold">Ruta / destino</th>
+            <th className="text-right py-2 font-semibold">Ingresos</th>
+            <th className="text-right py-2 font-semibold">Pasajes</th>
+            <th className="text-right py-2 font-semibold">vs semana base</th>
+          </tr>
+        </thead>
+        <tbody>
+          {routes.map(r => {
+            const base = baseMap.get(r.route);
+            const baseRev = base?.revenue ?? 0;
+            const bothHaveData = baseRev > 0 && r.revenue > 0;
+            const delta = bothHaveData ? (r.revenue - baseRev) / baseRev : 0;
+            return (
+              <tr key={r.route} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                <td className="py-2.5 font-medium text-slate-800">{r.route}</td>
+                <td className="py-2.5 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(r.revenue)}</td>
+                <td className="py-2.5 text-right tabular-nums text-slate-600">{formatNumber(r.items)}</td>
+                <td className={cn("py-2.5 text-right tabular-nums text-xs font-bold",
+                  !bothHaveData ? "text-slate-400" : delta >= 0 ? "text-emerald-600" : "text-rose-600"
+                )}>
+                  {bothHaveData
+                    ? `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(0)}%`
+                    : baseRev === 0 ? 'nueva' : '—'}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -102,8 +102,9 @@ el path en `App.tsx` y se redeploya.
 Tres secciones:
 1. **Semana base (4-10 may) vs Hot Week (11-17 may)** — KPIs hero (totales y
    por canal Meta/Google), curva diaria 14d con franja resaltada (ingresos
-   + inversión + compras en doble eje), top creatives Meta con thumbnails,
-   y **top campañas Meta+Google por revenue**.
+   + inversión + compras en doble eje), **top destinos vendidos según GA4
+   ecommerce**, top creatives Meta con thumbnails, y top campañas Meta+Google
+   por revenue.
 2. **YoY Hot Week 2025 (12-18 may) vs 2026 (11-17 may)** — solo Meta + Google
    total y por canal, sin breakdown por ruta (la data 2025 no está bien
    etiquetada).
@@ -111,8 +112,6 @@ Tres secciones:
    placement de Meta).
 
 **Sacado intencionalmente** (ver `ROADMAP.md` para detalle):
-- "Top destinos" — la inferencia desde nombre de campaña no refleja la
-  venta real. Requiere ecommerce tracking en GA4 para mostrarse bien.
 - "Búsquedas Google" — Andesmar tiene ~100% brand search, no agrega para
   presentar al cliente.
 - "Lift sobre baseline 4 semanas" — métrica engañosa mientras el evento
@@ -162,8 +161,10 @@ para repoblar `route` en filas históricas.
 - **Meta Breakdowns**: 1115 filas (age/gender/region/placement)
 - **Meta Hourly**: 356 filas (14 días)
 - **Google Ads Hourly**: 325 filas (14 días)
-- **GA4 KPIs**: 211 días (sept 2025 → 21 abril 2026, congelado por token expirado)
-- **product_routes**: 0 filas (Andesmar no trackea items)
+- **GA4 KPIs**: ~242 días (sept 2025 → presente, sync funcionando)
+- **product_routes**: ~3600 filas (sept 2025 → presente). Andesmar SÍ tiene
+  ecommerce tracking — la ruta llega como `itemName` con formato
+  "Origen → Destino" (ej: `Santiago → Mendoza`, `Salta → San Pedro De Atacama`)
 - **YouTube**: 165 filas (sync pausado)
 
 Top rutas detectadas (últimos 30d): Mendoza, Nacionales, Mendoza↔Chile,
@@ -173,7 +174,7 @@ Mendoza↔San Juan, NOA↔Patagonia, San Juan, Patagonia.
 
 - **Meta Ads**: System User token (larga duración) en `META_ACCESS_TOKEN`. Rate limits agresivos en `level=ad` con +500 ads — por eso syncMetaCreatives limita a top 60 por spend y rolling 7d.
 - **Google Ads**: Service account JWT (`google-ads-mcp@protean-genius-489017-j9.iam.gserviceaccount.com`, scope `adwords`). MCC en `GOOGLE_ADS_LOGIN_CUSTOMER_ID`.
-- **GA4**: `authorized_user` refresh_token OAuth (NO es service account, a pesar del nombre `GA4_SERVICE_ACCOUNT_JSON`). **Expira cada 7 días** porque el OAuth consent screen está en modo "Testing". Solución pendiente: publicar OAuth en Production O conseguir acceso admin a GA4 de Andesmar para migrar a service account real.
+- **GA4**: `authorized_user` refresh_token OAuth (NO es service account, a pesar del nombre `GA4_SERVICE_ACCOUNT_JSON`). El OAuth consent screen del proyecto `veta-ga4-sync` está **publicado en Production** (no Testing), por eso el refresh_token no expira automáticamente. Si en algún momento hay que renovarlo: correr `scripts/renew-ga4-token.ts`.
 
 ## Variables de entorno
 
