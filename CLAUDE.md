@@ -106,8 +106,9 @@ Tres secciones:
 2. **YoY Hot Week 2025 (12-18 may) vs 2026 (11-17 may)** — solo Meta + Google
    total y por canal, sin breakdown por ruta (la data 2025 no está bien
    etiquetada).
-3. **Heat-map hora×día Hot Week + lift sobre baseline 4 semanas previas +
-   demografía** (edad, género, región, placement de Meta).
+3. **Heat-map hora×día Hot Week + demografía** (edad, género, región,
+   placement de Meta). El "lift sobre baseline 4 semanas" se sacó el
+   2026-05-11 — ver detalle en `ROADMAP.md` sección "Sacado intencionalmente".
 
 Fechas hardcodeadas como constantes en el endpoint. Para reusar el patrón
 con otro evento (Cyber Monday, Black Friday, etc.) crear nuevo archivo

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  ArrowUpRight, ArrowDownRight, Flame, Calendar, TrendingUp, Sparkles,
-  ShoppingCart, MapPin, Users, Smartphone, Search, Image as ImageIcon, Clock,
+  ArrowUpRight, ArrowDownRight, Flame,
+  MapPin, Users, Smartphone, Search, Image as ImageIcon, Clock,
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceArea as RechartsReferenceArea, Legend } from 'recharts';
 
@@ -45,7 +45,6 @@ type HotSaleData = {
     weekBase:    { start: string; end: string };
     hotWeek:     { start: string; end: string };
     hotWeek2025: { start: string; end: string };
-    baseline4w:  { start: string; end: string };
   };
   weekly: {
     base:    RangeKpis;
@@ -66,12 +65,6 @@ type HotSaleData = {
     topVolumeSlot: HeatCell | null;
     bestEfficiencySlot: HeatCell | null;
     worstEfficiencySlot: HeatCell | null;
-  };
-  lift: {
-    baselineRange: { start: string; end: string };
-    baselineDailyAvg: { spend: number; revenue: number; purchases: number };
-    hotWeekDailyAvg:  { spend: number; revenue: number; purchases: number };
-    spendLift: number; revenueLift: number; purchasesLift: number;
   };
   demographics: { age: DemoItem[]; gender: DemoItem[]; region: DemoItem[]; placement: DemoItem[] };
   generatedAt: string;
@@ -115,7 +108,7 @@ export default function HotSale() {
 }
 
 function Report({ data }: { data: HotSaleData }) {
-  const { weekly, yoy, heatmap, lift, demographics, config } = data;
+  const { weekly, yoy, heatmap, demographics, config } = data;
   const today = new Date().toISOString().slice(0, 10);
   const phase: 'before' | 'during' | 'after' =
     today < config.hotWeek.start ? 'before'
@@ -266,32 +259,14 @@ function Report({ data }: { data: HotSaleData }) {
         </section>
 
         {/* ═══════════════════════════════════════════════════════════════
-            SECCIÓN 3 — Heat-map + Lift + Demografía
+            SECCIÓN 3 — Heat-map + Demografía
             ═══════════════════════════════════════════════════════════════ */}
         <section className="space-y-6">
           <SectionHeader
             number={3}
             title="Cuándo y a quién le vendiste"
-            subtitle="Heat-map hora×día durante la Hot Week, lift sobre el baseline normal, y perfil demográfico del comprador"
+            subtitle="Heat-map hora×día durante la Hot Week y perfil demográfico del comprador"
           />
-
-          {/* Lift vs baseline */}
-          <Card className="p-6">
-            <div className="mb-4 flex items-center gap-2">
-              <Sparkles size={18} className="text-slate-500" />
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Lift sobre el baseline</h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Cuánto creció el promedio diario durante la Hot Week vs las 4 semanas previas ({formatRange(lift.baselineRange)})
-                </p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <LiftCard label="Inversión diaria"  baseline={lift.baselineDailyAvg.spend}     hot={lift.hotWeekDailyAvg.spend}     liftPct={lift.spendLift}     fmt="currency" />
-              <LiftCard label="Ingresos diarios"  baseline={lift.baselineDailyAvg.revenue}   hot={lift.hotWeekDailyAvg.revenue}   liftPct={lift.revenueLift}   fmt="currency" highlight />
-              <LiftCard label="Compras diarias"   baseline={lift.baselineDailyAvg.purchases} hot={lift.hotWeekDailyAvg.purchases} liftPct={lift.purchasesLift} fmt="number" />
-            </div>
-          </Card>
 
           {/* Heat-map hora×día */}
           <Card className="p-6">
@@ -710,29 +685,6 @@ function MixYear({ year, mix }: { year: string; mix: any }) {
             <div className="bg-emerald-500" style={{ width: `${googleRev * 100}%` }} />
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function LiftCard({ label, baseline, hot, liftPct, fmt, highlight = false }: {
-  label: string; baseline: number; hot: number; liftPct: number;
-  fmt: 'currency' | 'number'; highlight?: boolean;
-}) {
-  const fmtFn = fmt === 'currency' ? formatCurrency : formatNumber;
-  const isPositive = liftPct > 0;
-  return (
-    <div className={cn("p-4 rounded-xl border",
-      highlight ? "bg-emerald-50/30 border-emerald-200" : "bg-slate-50 border-slate-100"
-    )}>
-      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">{label}</div>
-      <div className="text-2xl font-bold text-slate-900 tabular-nums">{fmtFn(hot)}</div>
-      <div className="text-xs text-slate-500 mt-1">vs {fmtFn(baseline)} baseline</div>
-      <div className={cn("mt-3 text-sm font-bold tabular-nums flex items-center gap-1",
-        baseline === 0 && hot === 0 ? "text-slate-400" : isPositive ? "text-emerald-700" : "text-rose-700"
-      )}>
-        {liftPct >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-        {liftPct >= 0 ? '+' : ''}{(liftPct * 100).toFixed(0)}% diario
       </div>
     </div>
   );

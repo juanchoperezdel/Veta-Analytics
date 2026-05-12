@@ -114,6 +114,57 @@ plantilla HTML en `scripts/templates/weekly.html`
 
 ---
 
+## Próxima frontera — Análisis con LLM (priorizado)
+
+### 11. Conclusiones estratégicas con Claude (analista, no watchdog)
+
+Las conclusiones actuales de cada pestaña son reglas determinísticas
+(`netlify/functions/_conclusions.ts`): `if savings > 5000`, `if share >= 25%`,
+etc. Funcionan como **watchdog** — alertan cuando algo cruza un umbral —
+pero tienen un techo claro:
+
+- Solo dicen lo que ya pensamos preguntar. Patrones nuevos no aparecen.
+- Una vez vistas 3 veces dejan de informar. Se vuelven checklist, no descubrimiento.
+- Las que siempre aparecen son justamente las que no estás dispuesto a actuar.
+- No cruzan dimensiones (creative × hora × demográfico × ruta) ni consideran
+  contexto de calendario (Hot Sale, fin de mes, feriados).
+
+**Solución**: sumar un segundo nivel de conclusiones, generadas por Claude
+una vez por semana (no cada hora). Las reglas siguen como watchdog para
+alarmas urgentes; el LLM hace el descubrimiento profundo.
+
+**Cómo funciona**:
+- Lunes 9am ART, antes del weekly email, un job llama a Claude Sonnet con
+  toda la data agregada del cliente: campañas, queries, demografía,
+  evolutivo, anomalías, contexto de calendario.
+- Prompt pide 5 hallazgos accionables que un analista experto encontraría,
+  incluyendo cruces multidimensionales y consideraciones contextuales.
+- Output se guarda en `llm_insights (week_start, client_id, payload jsonb)`.
+- UI: nueva sección "Análisis semanal" arriba de cada pestaña (o pestaña
+  dedicada `Insights.tsx`) que muestra los hallazgos con marca temporal.
+- El weekly email incluye los 3 más importantes en el cuerpo.
+
+**Decisión**: dejar de ver siempre lo mismo. Insights frescos cada semana
+con cruces que las reglas no pueden hacer.
+
+**Costo**: ~$0.50–$1 por análisis con Sonnet. Una vez por semana por
+cliente → **<$5/mes** total para Andesmar.
+
+**Archivos**:
+- nueva tabla `llm_insights` en `scripts/db/schema.sql`
+- `scripts/weekly-llm-analysis.ts` (job que llama a Claude y persiste)
+- `.github/workflows/weekly-llm-analysis.yml` (cron lunes 8:30am ART, antes
+  del email para que el email pueda incluirlos)
+- `netlify/functions/insights.ts` (sirve el último snapshot)
+- componente `WeeklyInsights.tsx` que se monta en pestañas relevantes
+- extender `scripts/weekly-report.ts` para incluir top 3 en el email
+- env var `ANTHROPIC_API_KEY` en GH Secrets
+
+**Pre-requisito**: no requiere arreglar GA4. Funciona con la data que ya
+tenemos en Neon (Meta + Google + breakdowns + hourly).
+
+---
+
 ## Tier 3 — Espera
 
 - **Cohort / LTV** — quién vuelve a comprar por canal (necesita GA4 + user_id consistente)
@@ -146,3 +197,43 @@ El cron corre lunes 9am ART automáticamente. Para probar antes: GitHub → Acti
 
 ### Pacing presupuestario
 Cargar el budget mensual desde el dashboard: pestaña **Pulso** → card "Pacing presupuestario" → "Cargar budget". Una vez por mes.
+
+---
+
+## Sacado intencionalmente — por si vuelve
+
+### "Lift sobre el baseline" en el informe Hot Sale (sacado 2026-05-11)
+
+Era un card en la Sección 3 del informe `/hot-sale-andesmar-2026` que comparaba
+el promedio diario de la Hot Week vs el promedio diario de las 4 semanas previas
+(BASELINE_4W = 6 abr → 3 may 2026). Mostraba spend / revenue / purchases diarios
+con un % de lift.
+
+**Por qué se sacó**:
+1. Mientras el evento estaba en curso, el "promedio diario" del Hot Week se
+   calculaba dividiendo el total por 7 aunque solo hubieran pasado 1-2 días.
+   Resultado: aparecía -83% / -69% / -76% el primer día y daba la sensación
+   de que el evento estaba fallando cuando recién arrancaba.
+2. Aunque se arreglara el cálculo (dividir por días reales transcurridos),
+   no aportaba una decisión accionable — el cliente ya tiene "vs semana base"
+   y "vs HS 2025" como comparativas más claras.
+3. Detectamos también un posible bug numérico: las compras diarias del Hot
+   Week salían en 34.571 cuando los KPIs hero del mismo período mostraban
+   46 compras totales. Nunca se llegó a investigar la raíz porque el card
+   se sacó antes.
+
+**Cómo volver a meterlo** si surge la necesidad:
+- En `netlify/functions/hot-sale.ts`: reagregar la constante `BASELINE_4W`,
+  el `kpisInRange()` correspondiente en `Promise.all`, el cálculo de `lift`
+  con `baselineDailyAvg` / `hotWeekDailyAvg` / `*Lift`, y exponerlo en el
+  return.
+- En `src/pages/HotSale.tsx`: reagregar el tipo `lift` en `HotSaleData`,
+  el destructuring, el componente `LiftCard`, y la sección JSX (entre el
+  SectionHeader de la 3 y el card del Heat-map).
+- **Antes de mostrar**: arreglar el cálculo del `hotWeekDailyAvg` para
+  dividir por días reales transcurridos (no por 7 fijo), y mostrar el
+  card solo cuando `phase === 'after'` para evitar números engañosos.
+- Investigar el desfase de purchases: posible double-count entre Meta y
+  Google si una compra se atribuye a ambos canales, o un bug en cómo se
+  suma `google_ads_campaigns.carts` (que pueden ser eventos de add-to-cart,
+  no ventas reales).

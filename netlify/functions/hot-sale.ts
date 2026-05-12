@@ -18,8 +18,6 @@ const SLUG = 'andesmar';
 const BASE_WEEK_2026  = { start: '2026-05-04', end: '2026-05-10' };
 const HOT_WEEK_2026   = { start: '2026-05-11', end: '2026-05-17' };
 const HOT_WEEK_2025   = { start: '2025-05-12', end: '2025-05-18' };
-// 4 semanas anteriores a la semana base (para lift): 6 abr - 3 may 2026
-const BASELINE_4W     = { start: '2026-04-06', end: '2026-05-03' };
 
 const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
@@ -334,7 +332,6 @@ export default async (req: Request, _context: Context) => {
     baseKpis,
     hotWeekKpis,
     hs2025Kpis,
-    baselineKpis,
     daily,
     routesHotWeek,
     routesBase,
@@ -346,7 +343,6 @@ export default async (req: Request, _context: Context) => {
     kpisInRange(BASE_WEEK_2026.start, BASE_WEEK_2026.end),
     kpisInRange(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
     kpisInRange(HOT_WEEK_2025.start, HOT_WEEK_2025.end),
-    kpisInRange(BASELINE_4W.start, BASELINE_4W.end),
     dailyCurve(),
     topRoutes(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
     topRoutes(BASE_WEEK_2026.start, BASE_WEEK_2026.end),
@@ -355,30 +351,6 @@ export default async (req: Request, _context: Context) => {
     heatmap(),
     demographics(),
   ]);
-
-  // Lift vs baseline — el baseline es 4 semanas (28 días) y la hot week 7 días.
-  // Comparamos en términos diarios para que sea apples-to-apples.
-  const baselineDays = 28;
-  const hotWeekDays  = 7;
-  const liftDailyAvg = {
-    spend:     baselineKpis.total.spend     / baselineDays,
-    revenue:   baselineKpis.total.revenue   / baselineDays,
-    purchases: baselineKpis.total.purchases / baselineDays,
-  };
-  const hotWeekDailyAvg = {
-    spend:     hotWeekKpis.total.spend     / hotWeekDays,
-    revenue:   hotWeekKpis.total.revenue   / hotWeekDays,
-    purchases: hotWeekKpis.total.purchases / hotWeekDays,
-  };
-  function pct(curr: number, base: number) { return base > 0 ? (curr - base) / base : 0; }
-  const lift = {
-    baselineRange: BASELINE_4W,
-    baselineDailyAvg: liftDailyAvg,
-    hotWeekDailyAvg,
-    spendLift:     pct(hotWeekDailyAvg.spend,     liftDailyAvg.spend),
-    revenueLift:   pct(hotWeekDailyAvg.revenue,   liftDailyAvg.revenue),
-    purchasesLift: pct(hotWeekDailyAvg.purchases, liftDailyAvg.purchases),
-  };
 
   // Mix de canal YoY — qué porcentaje aporta cada canal a spend y revenue
   function mix(k: any) {
@@ -396,7 +368,6 @@ export default async (req: Request, _context: Context) => {
       weekBase:    BASE_WEEK_2026,
       hotWeek:     HOT_WEEK_2026,
       hotWeek2025: HOT_WEEK_2025,
-      baseline4w:  BASELINE_4W,
     },
     weekly: {
       base: baseKpis,
@@ -412,7 +383,6 @@ export default async (req: Request, _context: Context) => {
       mix: { 2025: mix(hs2025Kpis), 2026: mix(hotWeekKpis) },
     },
     heatmap: heatmapData,
-    lift,
     demographics: demo,
     generatedAt: new Date().toISOString(),
   }), { headers: corsHeaders() });
