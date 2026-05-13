@@ -162,6 +162,24 @@ export default async (req: Request, _context: Context) => {
     }));
   }
 
+  // ─── Totales del Hot Week (para mostrar "top 12 vs total" en la tabla) ──
+  async function routesTotals(start: string, end: string) {
+    const [r] = await sql`
+      SELECT COUNT(DISTINCT route)::int   AS routes_count,
+             COALESCE(SUM(revenue), 0)::numeric  AS revenue,
+             COALESCE(SUM(articles), 0)::bigint  AS items
+      FROM product_routes
+      WHERE client_id = ${clientId}
+        AND snapshot_date BETWEEN ${start} AND ${end}
+        AND revenue > 0
+    `;
+    return {
+      routesCount: Number(r?.routes_count ?? 0),
+      revenue:     Number(r?.revenue ?? 0),
+      items:       Number(r?.items ?? 0),
+    };
+  }
+
   // ─── Top creatives Meta durante la Hot Week ────────────────────────────
   async function topCreatives() {
     const rows = await sql`
@@ -361,6 +379,7 @@ export default async (req: Request, _context: Context) => {
     daily,
     routesHotWeek,
     routesBase,
+    routesHotWeekTotals,
     creatives,
     campaigns,
     heatmapData,
@@ -372,6 +391,7 @@ export default async (req: Request, _context: Context) => {
     dailyCurve(),
     topRoutes(HOT_WEEK_2026.start, HOT_WEEK_2026.end, 50),
     topRoutes(BASE_WEEK_2026.start, BASE_WEEK_2026.end, null),
+    routesTotals(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
     topCreatives(),
     topCampaigns(),
     heatmap(),
@@ -399,7 +419,11 @@ export default async (req: Request, _context: Context) => {
       base: baseKpis,
       hotWeek: hotWeekKpis,
       daily,
-      routes: { hotWeek: routesHotWeek, base: routesBase },
+      routes: {
+        hotWeek: routesHotWeek,
+        base: routesBase,
+        hotWeekTotals: routesHotWeekTotals,
+      },
       creatives,
       campaigns,
     },

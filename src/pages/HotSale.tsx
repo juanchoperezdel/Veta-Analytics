@@ -52,7 +52,11 @@ type HotSaleData = {
     base:    RangeKpis;
     hotWeek: RangeKpis;
     daily:   DailyPoint[];
-    routes:  { hotWeek: Route[]; base: Route[] };
+    routes:  {
+      hotWeek: Route[];
+      base: Route[];
+      hotWeekTotals: { routesCount: number; revenue: number; items: number };
+    };
     creatives: Creative[];
     campaigns: Campaign[];
   };
@@ -196,7 +200,7 @@ function Report({ data }: { data: HotSaleData }) {
                 <p className="text-xs text-slate-500 mt-1">Rutas con más revenue según Google Analytics (data real de ecommerce, no inferida)</p>
               </div>
             </div>
-            <RoutesTable routes={weekly.routes.hotWeek} baseRoutes={weekly.routes.base} />
+            <RoutesTable routes={weekly.routes.hotWeek} baseRoutes={weekly.routes.base} totals={weekly.routes.hotWeekTotals} />
           </Card>
 
           {/* Top creatives Meta */}
@@ -533,7 +537,11 @@ const ROUTE_SORT_LABELS: Record<RouteSort, string> = {
   avgPrice: 'Precio promedio',
 };
 
-function RoutesTable({ routes, baseRoutes }: { routes: Route[]; baseRoutes: Route[] }) {
+function RoutesTable({ routes, baseRoutes, totals }: {
+  routes: Route[];
+  baseRoutes: Route[];
+  totals: { routesCount: number; revenue: number; items: number };
+}) {
   const [sort, setSort] = useState<RouteSort>('revenue');
 
   if (routes.length === 0) {
@@ -541,7 +549,6 @@ function RoutesTable({ routes, baseRoutes }: { routes: Route[]; baseRoutes: Rout
   }
   const baseMap = new Map(baseRoutes.map(r => [r.route, r]));
 
-  // Enriquecer con delta y precio promedio antes de ordenar
   const enriched = routes.map(r => {
     const base = baseMap.get(r.route);
     const baseRev = base?.revenue ?? 0;
@@ -551,16 +558,24 @@ function RoutesTable({ routes, baseRoutes }: { routes: Route[]; baseRoutes: Rout
     return { ...r, baseRev, delta, avgPrice };
   });
 
-  // Ordenar según el criterio elegido
   const sorted = [...enriched].sort((a, b) => {
     if (sort === 'revenue')  return b.revenue - a.revenue;
     if (sort === 'items')    return b.items - a.items;
     if (sort === 'avgPrice') return b.avgPrice - a.avgPrice;
-    // delta: las que tienen delta numérico primero (ordenadas desc), las "nuevas" al final
     const ad = a.delta ?? -Infinity;
     const bd = b.delta ?? -Infinity;
     return bd - ad;
   }).slice(0, 12);
+
+  // Totales del top 12 visible (para "Otras" y el footer)
+  const topRevenue = sorted.reduce((s, r) => s + r.revenue, 0);
+  const topItems   = sorted.reduce((s, r) => s + r.items, 0);
+  const otrasRevenue = Math.max(0, totals.revenue - topRevenue);
+  const otrasItems   = Math.max(0, totals.items - topItems);
+  const otrasCount   = Math.max(0, totals.routesCount - sorted.length);
+  const otrasAvg     = otrasItems > 0 ? otrasRevenue / otrasItems : 0;
+  const revenueShare = totals.revenue > 0 ? topRevenue / totals.revenue : 0;
+  const itemsShare   = totals.items   > 0 ? topItems   / totals.items   : 0;
 
   return (
     <div>
@@ -609,8 +624,31 @@ function RoutesTable({ routes, baseRoutes }: { routes: Route[]; baseRoutes: Rout
                 </td>
               </tr>
             ))}
+            {otrasCount > 0 && (
+              <tr className="border-b border-slate-100 bg-slate-50/50 italic">
+                <td className="py-2.5 font-medium text-slate-500">Otras ({formatNumber(otrasCount)} rutas)</td>
+                <td className="py-2.5 text-right tabular-nums text-slate-600">{formatCurrency(otrasRevenue)}</td>
+                <td className="py-2.5 text-right tabular-nums text-slate-500">{formatNumber(otrasItems)}</td>
+                <td className="py-2.5 text-right tabular-nums text-slate-400 text-xs">{otrasItems > 0 ? formatCurrency(otrasAvg) : '—'}</td>
+                <td className="py-2.5 text-right tabular-nums text-xs text-slate-400">—</td>
+              </tr>
+            )}
+            <tr className="border-t-2 border-slate-300 font-bold">
+              <td className="py-3 text-slate-900">Total Hot Week ({formatNumber(totals.routesCount)} rutas)</td>
+              <td className="py-3 text-right tabular-nums text-slate-900">{formatCurrency(totals.revenue)}</td>
+              <td className="py-3 text-right tabular-nums text-slate-900">{formatNumber(totals.items)}</td>
+              <td className="py-3 text-right tabular-nums text-slate-500 text-xs">
+                {totals.items > 0 ? formatCurrency(totals.revenue / totals.items) : '—'}
+              </td>
+              <td className="py-3"></td>
+            </tr>
           </tbody>
         </table>
+      </div>
+
+      <div className="mt-3 text-[11px] text-slate-500 italic">
+        El top 12 visible representa <strong className="text-slate-700">{(revenueShare * 100).toFixed(0)}%</strong> del revenue
+        y <strong className="text-slate-700">{(itemsShare * 100).toFixed(0)}%</strong> de los pasajes vendidos en toda la Hot Week.
       </div>
     </div>
   );
