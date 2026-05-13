@@ -162,6 +162,28 @@ export default async (req: Request, _context: Context) => {
     }));
   }
 
+  // ─── Origen del tráfico (GA4 sessionDefaultChannelGroup) ──────────────
+  async function trafficChannels(start: string, end: string) {
+    const rows = await sql`
+      SELECT channel_group,
+             SUM(sessions)::bigint     AS sessions,
+             SUM(transactions)::bigint AS transactions,
+             SUM(revenue)::numeric     AS revenue
+      FROM traffic_channels
+      WHERE client_id = ${clientId}
+        AND snapshot_date BETWEEN ${start} AND ${end}
+      GROUP BY channel_group
+      HAVING SUM(sessions) > 0
+      ORDER BY SUM(revenue) DESC, SUM(sessions) DESC
+    `;
+    return rows.map((r: any) => ({
+      channel:      r.channel_group,
+      sessions:     Number(r.sessions ?? 0),
+      transactions: Number(r.transactions ?? 0),
+      revenue:      Number(r.revenue ?? 0),
+    }));
+  }
+
   // ─── Totales del Hot Week (para mostrar "top 12 vs total" en la tabla) ──
   async function routesTotals(start: string, end: string) {
     const [r] = await sql`
@@ -380,6 +402,7 @@ export default async (req: Request, _context: Context) => {
     routesHotWeek,
     routesBase,
     routesHotWeekTotals,
+    channels,
     creatives,
     campaigns,
     heatmapData,
@@ -392,6 +415,7 @@ export default async (req: Request, _context: Context) => {
     topRoutes(HOT_WEEK_2026.start, HOT_WEEK_2026.end, 50),
     topRoutes(BASE_WEEK_2026.start, BASE_WEEK_2026.end, null),
     routesTotals(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
+    trafficChannels(HOT_WEEK_2026.start, HOT_WEEK_2026.end),
     topCreatives(),
     topCampaigns(),
     heatmap(),
@@ -424,6 +448,7 @@ export default async (req: Request, _context: Context) => {
         base: routesBase,
         hotWeekTotals: routesHotWeekTotals,
       },
+      channels,
       creatives,
       campaigns,
     },

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowUpRight, ArrowDownRight, Flame, TrendingUp,
-  MapPin, Users, Smartphone, Image as ImageIcon, Clock,
+  MapPin, Users, Smartphone, Image as ImageIcon, Clock, Globe,
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceArea as RechartsReferenceArea, Legend } from 'recharts';
 
@@ -27,6 +27,7 @@ type DailyPoint = {
   isHotWeek: boolean;
 };
 type Route = { route: string; revenue: number; items: number; purchases: number };
+type Channel = { channel: string; sessions: number; transactions: number; revenue: number };
 type Campaign = {
   name: string; channel: 'Meta' | 'Google';
   spend: number; revenue: number; purchases: number;
@@ -57,6 +58,7 @@ type HotSaleData = {
       base: Route[];
       hotWeekTotals: { routesCount: number; revenue: number; items: number };
     };
+    channels: Channel[];
     creatives: Creative[];
     campaigns: Campaign[];
   };
@@ -201,6 +203,18 @@ function Report({ data }: { data: HotSaleData }) {
               </div>
             </div>
             <RoutesTable routes={weekly.routes.hotWeek} baseRoutes={weekly.routes.base} totals={weekly.routes.hotWeekTotals} />
+          </Card>
+
+          {/* Origen del tráfico (Paid Search, Paid Social, Direct, etc.) */}
+          <Card className="p-6">
+            <div className="mb-4 flex items-center gap-2">
+              <Globe size={18} className="text-slate-500" />
+              <div>
+                <h3 className="text-base font-bold text-slate-900">De dónde vinieron las ventas — Hot Week</h3>
+                <p className="text-xs text-slate-500 mt-1">Mix de canales según Google Analytics: pauta, orgánico, directo, referidos, etc.</p>
+              </div>
+            </div>
+            <ChannelsTable channels={weekly.channels} />
           </Card>
 
           {/* Top creatives Meta */}
@@ -525,6 +539,78 @@ function DailyCurveChart({ daily, hotWeek }: { daily: DailyPoint[]; hotWeek: { s
           <Line yAxisId="purchases" type="monotone" dataKey="purchases" name="Compras"   stroke="#8b5cf6" strokeWidth={2}   dot={{ r: 2 }} strokeDasharray="4 2" />
         </LineChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+function ChannelsTable({ channels }: { channels: Channel[] }) {
+  if (channels.length === 0) {
+    return <div className="py-8 text-center text-sm text-slate-400">Aún no hay datos de tráfico por canal en la Hot Week.</div>;
+  }
+  const totalRev = channels.reduce((s, c) => s + c.revenue, 0);
+  const totalSessions = channels.reduce((s, c) => s + c.sessions, 0);
+  const totalTransactions = channels.reduce((s, c) => s + c.transactions, 0);
+  const maxRev = Math.max(...channels.map(c => c.revenue), 1);
+
+  // Colores por tipo de canal — paid en naranjas/azules, orgánico en verdes, directo en gris
+  function colorFor(channel: string): { bar: string; pill: string } {
+    const c = channel.toLowerCase();
+    if (c.includes('paid search'))   return { bar: 'bg-orange-500', pill: 'text-orange-700 bg-orange-50' };
+    if (c.includes('paid social'))   return { bar: 'bg-blue-500',   pill: 'text-blue-700 bg-blue-50'     };
+    if (c.includes('display'))       return { bar: 'bg-pink-500',   pill: 'text-pink-700 bg-pink-50'     };
+    if (c.includes('organic search'))return { bar: 'bg-emerald-500',pill: 'text-emerald-700 bg-emerald-50' };
+    if (c.includes('organic social'))return { bar: 'bg-teal-500',   pill: 'text-teal-700 bg-teal-50'     };
+    if (c.includes('direct'))        return { bar: 'bg-slate-500',  pill: 'text-slate-700 bg-slate-100'  };
+    if (c.includes('referral'))      return { bar: 'bg-purple-500', pill: 'text-purple-700 bg-purple-50' };
+    if (c.includes('email'))         return { bar: 'bg-amber-500',  pill: 'text-amber-700 bg-amber-50'   };
+    return                                  { bar: 'bg-slate-400',  pill: 'text-slate-600 bg-slate-100'  };
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase">
+            <th className="text-left py-2 font-semibold">Canal</th>
+            <th className="text-right py-2 font-semibold">Sesiones</th>
+            <th className="text-right py-2 font-semibold">Compras</th>
+            <th className="text-right py-2 font-semibold">Ingresos</th>
+            <th className="py-2 font-semibold pl-4 w-1/3">% del revenue</th>
+          </tr>
+        </thead>
+        <tbody>
+          {channels.map(c => {
+            const share = totalRev > 0 ? c.revenue / totalRev : 0;
+            const widthPct = (c.revenue / maxRev) * 100;
+            const color = colorFor(c.channel);
+            return (
+              <tr key={c.channel} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
+                <td className="py-2.5">
+                  <span className={cn("text-[11px] font-bold px-2 py-0.5 rounded uppercase", color.pill)}>{c.channel}</span>
+                </td>
+                <td className="py-2.5 text-right tabular-nums text-slate-600">{formatNumber(c.sessions)}</td>
+                <td className="py-2.5 text-right tabular-nums text-slate-600">{formatNumber(c.transactions)}</td>
+                <td className="py-2.5 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(c.revenue)}</td>
+                <td className="py-2.5 pl-4">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div className={cn("h-full rounded-full transition-all", color.bar)} style={{ width: `${widthPct}%` }} />
+                    </div>
+                    <span className="text-xs font-bold tabular-nums text-slate-700 w-12 text-right">{(share * 100).toFixed(0)}%</span>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+          <tr className="border-t-2 border-slate-300 font-bold">
+            <td className="py-3 text-slate-900">Total</td>
+            <td className="py-3 text-right tabular-nums text-slate-900">{formatNumber(totalSessions)}</td>
+            <td className="py-3 text-right tabular-nums text-slate-900">{formatNumber(totalTransactions)}</td>
+            <td className="py-3 text-right tabular-nums text-slate-900">{formatCurrency(totalRev)}</td>
+            <td className="py-3 pl-4 text-slate-500 text-xs">100%</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }

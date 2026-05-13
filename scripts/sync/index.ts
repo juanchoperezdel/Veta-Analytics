@@ -727,7 +727,52 @@ async function syncGA4(clientId: string, propertyId: string) {
     `;
   }
 
-  console.log(`✓ GA4 synced: ${kpisData.rows?.length ?? 0} days KPIs, ${routesData.rows?.length ?? 0} route-days`);
+  // Canales de tráfico (sessionDefaultChannelGroup) — mix de origen de
+  // sesiones y revenue por canal (Paid Search, Paid Social, Direct, etc.)
+  const channelsRes = await fetch(
+    `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dateRanges: [{ startDate: '30daysAgo', endDate: 'today' }],
+        dimensions: [{ name: 'date' }, { name: 'sessionDefaultChannelGroup' }],
+        metrics: [
+          { name: 'sessions' },
+          { name: 'transactions' },
+          { name: 'purchaseRevenue' },
+        ],
+        orderBys: [{ dimension: { dimensionName: 'date' } }],
+        limit: 2000,
+      }),
+    }
+  );
+  const channelsData = await channelsRes.json();
+  if (channelsData.error) {
+    console.error(`  ✗ GA4 channels query error: ${channelsData.error.message}`);
+  }
+
+  for (const row of channelsData.rows ?? []) {
+    const date         = ga4DateToISO(row.dimensionValues[0].value);
+    const channelGroup = row.dimensionValues[1].value || '(unassigned)';
+    const m            = row.metricValues;
+    const sessions     = parseInt(m[0].value ?? '0');
+    const transactions = parseInt(m[1].value ?? '0');
+    const revenue      = parseFloat(m[2].value ?? '0');
+
+    await sql`
+      INSERT INTO traffic_channels
+        (client_id, snapshot_date, channel_group, sessions, transactions, revenue)
+      VALUES
+        (${clientId}, ${date}, ${channelGroup}, ${sessions}, ${transactions}, ${revenue})
+      ON CONFLICT (client_id, snapshot_date, channel_group)
+      DO UPDATE SET
+        sessions = EXCLUDED.sessions, transactions = EXCLUDED.transactions,
+        revenue = EXCLUDED.revenue, synced_at = NOW()
+    `;
+  }
+
+  console.log(`✓ GA4 synced: ${kpisData.rows?.length ?? 0} days KPIs, ${routesData.rows?.length ?? 0} route-days, ${channelsData.rows?.length ?? 0} channel-days`);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

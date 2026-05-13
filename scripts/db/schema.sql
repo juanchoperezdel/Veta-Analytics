@@ -250,6 +250,22 @@ CREATE TABLE IF NOT EXISTS google_ads_hourly (
   UNIQUE (client_id, snapshot_date, hour)
 );
 
+-- ─── Canales de tráfico (GA4 sessionDefaultChannelGroup) ──────────────────
+-- Una fila por (cliente, día, canal). Útil para ver mix de origen de las
+-- ventas: Paid Search, Paid Social, Direct, Organic Search, Referral, etc.
+CREATE TABLE IF NOT EXISTS traffic_channels (
+  id            SERIAL PRIMARY KEY,
+  client_id     TEXT NOT NULL REFERENCES clients(id),
+  snapshot_date DATE NOT NULL,
+  channel_group TEXT NOT NULL,          -- ej: 'Paid Search', 'Direct', 'Organic Search'
+  sessions      BIGINT,
+  transactions  BIGINT,
+  revenue       NUMERIC(18,2),
+  synced_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (client_id, snapshot_date, channel_group)
+);
+CREATE INDEX IF NOT EXISTS idx_traffic_channels ON traffic_channels (client_id, snapshot_date);
+
 -- ─── Pacing presupuestario ─────────────────────────────────────────────────
 -- Budget mensual por cliente. Una fila por mes (primer día del mes).
 CREATE TABLE IF NOT EXISTS client_budgets (
