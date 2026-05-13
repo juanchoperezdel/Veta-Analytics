@@ -727,8 +727,10 @@ async function syncGA4(clientId: string, propertyId: string) {
     `;
   }
 
-  // Canales de tráfico (sessionDefaultChannelGroup) — mix de origen de
-  // sesiones y revenue por canal (Paid Search, Paid Social, Direct, etc.)
+  // Canales de tráfico — pedimos sessionSource + sessionMedium y aplicamos
+  // clasificación PROPIA. El sessionDefaultChannelGroup de GA4 mal-categoriza
+  // (ej: Facebook_Ads/fbc lo manda a Organic Social, UTMs no estándar a
+  // Unassigned). Acá agrupamos por reglas y guardamos agregado por canal.
   const channelsRes = await fetch(
     `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
     {
@@ -736,14 +738,19 @@ async function syncGA4(clientId: string, propertyId: string) {
       headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         dateRanges: [{ startDate: '30daysAgo', endDate: 'today' }],
-        dimensions: [{ name: 'date' }, { name: 'sessionDefaultChannelGroup' }],
+        dimensions: [
+          { name: 'date' },
+          { name: 'sessionSource' },
+          { name: 'sessionMedium' },
+          { name: 'sessionDefaultChannelGroup' }, // fallback para Cross-network y Display
+        ],
         metrics: [
           { name: 'sessions' },
           { name: 'transactions' },
           { name: 'purchaseRevenue' },
         ],
         orderBys: [{ dimension: { dimensionName: 'date' } }],
-        limit: 2000,
+        limit: 50000,
       }),
     }
   );
@@ -752,19 +759,30 @@ async function syncGA4(clientId: string, propertyId: string) {
     console.error(`  ✗ GA4 channels query error: ${channelsData.error.message}`);
   }
 
+  // Agrupamos en JS por (date, channelClassified) antes de insertar
+  type Agg = { sessions: number; transactions: number; revenue: number };
+  const agg = new Map<string, Agg>();
   for (const row of channelsData.rows ?? []) {
-    const date         = ga4DateToISO(row.dimensionValues[0].value);
-    const channelGroup = row.dimensionValues[1].value || '(unassigned)';
-    const m            = row.metricValues;
-    const sessions     = parseInt(m[0].value ?? '0');
-    const transactions = parseInt(m[1].value ?? '0');
-    const revenue      = parseFloat(m[2].value ?? '0');
+    const date     = ga4DateToISO(row.dimensionValues[0].value);
+    const source   = row.dimensionValues[1].value || '';
+    const medium   = row.dimensionValues[2].value || '';
+    const original = row.dimensionValues[3].value || '';
+    const channel  = classifyChannel(source, medium, original);
+    const key = `${date}|${channel}`;
+    if (!agg.has(key)) agg.set(key, { sessions: 0, transactions: 0, revenue: 0 });
+    const a = agg.get(key)!;
+    a.sessions     += parseInt(row.metricValues[0].value ?? '0');
+    a.transactions += parseInt(row.metricValues[1].value ?? '0');
+    a.revenue      += parseFloat(row.metricValues[2].value ?? '0');
+  }
 
+  for (const [key, v] of agg) {
+    const [date, channel] = key.split('|');
     await sql`
       INSERT INTO traffic_channels
         (client_id, snapshot_date, channel_group, sessions, transactions, revenue)
       VALUES
-        (${clientId}, ${date}, ${channelGroup}, ${sessions}, ${transactions}, ${revenue})
+        (${clientId}, ${date}, ${channel}, ${v.sessions}, ${v.transactions}, ${v.revenue})
       ON CONFLICT (client_id, snapshot_date, channel_group)
       DO UPDATE SET
         sessions = EXCLUDED.sessions, transactions = EXCLUDED.transactions,
@@ -772,7 +790,64 @@ async function syncGA4(clientId: string, propertyId: string) {
     `;
   }
 
-  console.log(`✓ GA4 synced: ${kpisData.rows?.length ?? 0} days KPIs, ${routesData.rows?.length ?? 0} route-days, ${channelsData.rows?.length ?? 0} channel-days`);
+  console.log(`✓ GA4 synced: ${kpisData.rows?.length ?? 0} days KPIs, ${routesData.rows?.length ?? 0} route-days, ${agg.size} channel-days (${channelsData.rows?.length ?? 0} source-medium rows clasificadas)`);
+}
+
+// Clasificación propia de canales — supera las limitaciones del
+// sessionDefaultChannelGroup de GA4 cuando los UTMs no son estándar.
+function classifyChannel(source: string, medium: string, originalChannel: string): string {
+  const s = source.toLowerCase();
+  const m = medium.toLowerCase();
+  const orig = originalChannel;
+
+  // Cross-network (Performance Max de Google) lo respetamos
+  if (orig === 'Cross-network') return 'Cross-network';
+
+  // Display lo respetamos
+  if (orig === 'Display') return 'Display';
+
+  // Paid Video (YouTube Ads)
+  if (orig === 'Paid Video') return 'Paid Video';
+
+  // Meta / Facebook / Instagram
+  if (/facebook|meta|instagram|^fb$|^ig$/.test(s)) {
+    if (/paid|cpc|ppc|fbc|social|cpm/.test(m)) return 'Paid Social';
+    if (m === 'referral') return 'Organic Social';
+    return 'Organic Social';
+  }
+
+  // TikTok / Twitter / LinkedIn
+  if (/tiktok|twitter|^t\.co|linkedin/.test(s)) {
+    return /paid|cpc|ppc/.test(m) ? 'Paid Social' : 'Organic Social';
+  }
+
+  // Google
+  if (s === 'google' || s.startsWith('google.') || s === 'googleads') {
+    if (/cpc|ppc|paid/.test(m)) return 'Paid Search';
+    if (m === 'organic' || /search/.test(m)) return 'Organic Search';
+  }
+
+  // Otros buscadores
+  if (/bing|^yahoo|duckduckgo|ecosia|brave|search\.yahoo/.test(s)) return 'Organic Search';
+
+  // Email
+  if (/email|newsletter|emailing/.test(m) || /emblue|mailchimp|sendgrid/.test(s)) return 'Email';
+
+  // Afiliados / partners — CACE, cupones, sitios partner
+  if (
+    /cace|cupon|partner|afiliados|black|bomba|recorrido|aderpe/.test(s)
+    || /cupon|partner|black|bomba|logo|oferta|banner/.test(m)
+  ) return 'Afiliados / Partners';
+
+  // Direct
+  if (s === '(direct)' || (s === '' && m === '(none)')) return 'Direct';
+
+  // Referral
+  if (m === 'referral') return 'Referral';
+
+  // Lo que GA4 no pudo clasificar Y nosotros tampoco — Unassigned
+  if (orig === 'Unassigned' || orig === '(unassigned)' || !orig) return 'Otros';
+  return orig;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
