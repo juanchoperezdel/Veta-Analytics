@@ -202,6 +202,42 @@ Cargar el budget mensual desde el dashboard: pestaña **Pulso** → card "Pacing
 
 ## Sacado intencionalmente — por si vuelve
 
+### "De dónde vinieron las ventas — mix de canales" en el informe Hot Sale (oculto 2026-05-14)
+
+Era un card en la Sección 1 del informe `/hot-sale-andesmar-2026` que
+mostraba el mix de canales de tráfico (Paid Search, Paid Social, Direct,
+Organic Search, Afiliados / Partners, etc.) durante la Hot Week con
+sesiones, items vendidos y revenue.
+
+**Por qué se ocultó** (no eliminado, solo comentado el JSX):
+- La clasificación propia (`classifyChannel()` en `scripts/sync/index.ts`)
+  ya supera al `sessionDefaultChannelGroup` de GA4 (que mal-categoriza
+  Facebook_Ads/fbc, CACE, etc.).
+- Pero el cliente sigue viendo números que no le cierran. Aún hay edge
+  cases por descubrir en cómo Andesmar etiqueta sus UTMs (sources nuevos,
+  campañas con `medium` raros, etc.).
+- Para no presentarle al cliente data que no es 100% confiable, el card
+  se oculta hasta que se valide bien la clasificación contra los reportes
+  de GA4 nativos del cliente.
+
+**Cómo volver a habilitarlo**:
+- Toda la infra sigue funcionando: tabla `traffic_channels` se llena en
+  cada cron horario, endpoint `hot-sale.ts` sigue exponiendo
+  `weekly.channels`, componente `ChannelsTable` sigue en código.
+- Solo hay que descomentar el bloque JSX en `src/pages/HotSale.tsx`
+  (buscar el comentario "Origen del tráfico — OCULTO temporalmente").
+- Antes de descomentar, validar la clasificación contra GA4 real:
+  abrir Reports → Acquisition → Traffic acquisition + dimension secundaria
+  "Session source / medium" en el cliente y comparar números.
+- Si hay sources nuevos a clasificar, ampliar las reglas de
+  `classifyChannel()` con los patrones nuevos.
+
+**Decisión a futuro**: la columna del medio debería decir **"Compras"**
+(transactions) en lugar de "Pasajes" (items). Para eso, en el sync
+volver a `purchaseRevenue + transactions` en lugar de `itemRevenue +
+itemsPurchased`. El label ya está cambiado en el componente; falta solo
+ajustar la métrica.
+
 ### "Búsquedas más relevantes (Google Ads)" en el informe Hot Sale (sacado 2026-05-11)
 
 Era una tabla con los top queries de Google Ads que activaron los ads

@@ -205,7 +205,11 @@ function Report({ data }: { data: HotSaleData }) {
             <RoutesTable routes={weekly.routes.hotWeek} baseRoutes={weekly.routes.base} totals={weekly.routes.hotWeekTotals} />
           </Card>
 
-          {/* Origen del tráfico (Paid Search, Paid Social, Direct, etc.) */}
+          {/* Origen del tráfico — OCULTO temporalmente (2026-05-14).
+              La clasificación todavía no es 100% confiable: ver
+              ROADMAP.md sección "Oculto temporalmente". El sync sigue
+              corriendo y traffic_channels se mantiene actualizada, así
+              que cuando volvamos a habilitar tenemos data histórica.
           <Card className="p-6">
             <div className="mb-4 flex items-center gap-2">
               <Globe size={18} className="text-slate-500" />
@@ -216,6 +220,7 @@ function Report({ data }: { data: HotSaleData }) {
             </div>
             <ChannelsTable channels={weekly.channels} />
           </Card>
+          */}
 
           {/* Top creatives Meta */}
           <Card className="p-6">
@@ -573,7 +578,7 @@ function ChannelsTable({ channels }: { channels: Channel[] }) {
           <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase">
             <th className="text-left py-2 font-semibold">Canal</th>
             <th className="text-right py-2 font-semibold">Sesiones</th>
-            <th className="text-right py-2 font-semibold">Pasajes</th>
+            <th className="text-right py-2 font-semibold">Compras</th>
             <th className="text-right py-2 font-semibold">Ingresos</th>
             <th className="py-2 font-semibold pl-4 w-1/3">% del revenue</th>
           </tr>
