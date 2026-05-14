@@ -162,25 +162,27 @@ export default async (req: Request, _context: Context) => {
     }));
   }
 
-  // ─── Origen del tráfico (GA4 sessionDefaultChannelGroup) ──────────────
+  // ─── Origen del tráfico — agrupado con clasificación propia ─────────────
+  // sessions, items (pasajes) y revenue vienen de GA4 con métricas item-level
+  // (itemsPurchased + itemRevenue), consistente con Top Destinos.
   async function trafficChannels(start: string, end: string) {
     const rows = await sql`
       SELECT channel_group,
              SUM(sessions)::bigint     AS sessions,
-             SUM(transactions)::bigint AS transactions,
+             SUM(transactions)::bigint AS items,
              SUM(revenue)::numeric     AS revenue
       FROM traffic_channels
       WHERE client_id = ${clientId}
         AND snapshot_date BETWEEN ${start} AND ${end}
       GROUP BY channel_group
-      HAVING SUM(sessions) > 0
+      HAVING SUM(revenue) > 0 OR SUM(transactions) > 0
       ORDER BY SUM(revenue) DESC, SUM(sessions) DESC
     `;
     return rows.map((r: any) => ({
-      channel:      r.channel_group,
-      sessions:     Number(r.sessions ?? 0),
-      transactions: Number(r.transactions ?? 0),
-      revenue:      Number(r.revenue ?? 0),
+      channel:  r.channel_group,
+      sessions: Number(r.sessions ?? 0),
+      items:    Number(r.items ?? 0),
+      revenue:  Number(r.revenue ?? 0),
     }));
   }
 

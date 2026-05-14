@@ -730,7 +730,13 @@ async function syncGA4(clientId: string, propertyId: string) {
   // Canales de tráfico — pedimos sessionSource + sessionMedium y aplicamos
   // clasificación PROPIA. El sessionDefaultChannelGroup de GA4 mal-categoriza
   // (ej: Facebook_Ads/fbc lo manda a Organic Social, UTMs no estándar a
-  // Unassigned). Acá agrupamos por reglas y guardamos agregado por canal.
+  // Unassigned).
+  //
+  // Importante: usamos itemRevenue + itemsPurchased (item-level) en lugar
+  // de purchaseRevenue + transactions para que los números cuadren con la
+  // tabla de Top Destinos (que también usa itemRevenue/itemsPurchased).
+  // En GA4 esto equivale a mirar Monetization → Ecommerce purchases con
+  // dimensión secundaria Source/Medium.
   const channelsRes = await fetch(
     `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runReport`,
     {
@@ -745,9 +751,9 @@ async function syncGA4(clientId: string, propertyId: string) {
           { name: 'sessionDefaultChannelGroup' }, // fallback para Cross-network y Display
         ],
         metrics: [
-          { name: 'sessions' },
-          { name: 'transactions' },
-          { name: 'purchaseRevenue' },
+          { name: 'sessions' },        // sesiones scope-item (las que tuvieron compra)
+          { name: 'itemsPurchased' },  // cantidad de pasajes vendidos
+          { name: 'itemRevenue' },     // revenue de items (= purchaseRevenue para Andesmar)
         ],
         orderBys: [{ dimension: { dimensionName: 'date' } }],
         limit: 50000,

@@ -27,7 +27,7 @@ type DailyPoint = {
   isHotWeek: boolean;
 };
 type Route = { route: string; revenue: number; items: number; purchases: number };
-type Channel = { channel: string; sessions: number; transactions: number; revenue: number };
+type Channel = { channel: string; sessions: number; items: number; revenue: number };
 type Campaign = {
   name: string; channel: 'Meta' | 'Google';
   spend: number; revenue: number; purchases: number;
@@ -549,7 +549,7 @@ function ChannelsTable({ channels }: { channels: Channel[] }) {
   }
   const totalRev = channels.reduce((s, c) => s + c.revenue, 0);
   const totalSessions = channels.reduce((s, c) => s + c.sessions, 0);
-  const totalTransactions = channels.reduce((s, c) => s + c.transactions, 0);
+  const totalItems = channels.reduce((s, c) => s + c.items, 0);
   const maxRev = Math.max(...channels.map(c => c.revenue), 1);
 
   // Colores por tipo de canal — paid en naranjas/azules, orgánico en verdes, directo en gris
@@ -573,7 +573,7 @@ function ChannelsTable({ channels }: { channels: Channel[] }) {
           <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase">
             <th className="text-left py-2 font-semibold">Canal</th>
             <th className="text-right py-2 font-semibold">Sesiones</th>
-            <th className="text-right py-2 font-semibold">Compras</th>
+            <th className="text-right py-2 font-semibold">Pasajes</th>
             <th className="text-right py-2 font-semibold">Ingresos</th>
             <th className="py-2 font-semibold pl-4 w-1/3">% del revenue</th>
           </tr>
@@ -589,7 +589,7 @@ function ChannelsTable({ channels }: { channels: Channel[] }) {
                   <span className={cn("text-[11px] font-bold px-2 py-0.5 rounded uppercase", color.pill)}>{c.channel}</span>
                 </td>
                 <td className="py-2.5 text-right tabular-nums text-slate-600">{formatNumber(c.sessions)}</td>
-                <td className="py-2.5 text-right tabular-nums text-slate-600">{formatNumber(c.transactions)}</td>
+                <td className="py-2.5 text-right tabular-nums text-slate-600">{formatNumber(c.items)}</td>
                 <td className="py-2.5 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(c.revenue)}</td>
                 <td className="py-2.5 pl-4">
                   <div className="flex items-center gap-2">
@@ -605,7 +605,7 @@ function ChannelsTable({ channels }: { channels: Channel[] }) {
           <tr className="border-t-2 border-slate-300 font-bold">
             <td className="py-3 text-slate-900">Total</td>
             <td className="py-3 text-right tabular-nums text-slate-900">{formatNumber(totalSessions)}</td>
-            <td className="py-3 text-right tabular-nums text-slate-900">{formatNumber(totalTransactions)}</td>
+            <td className="py-3 text-right tabular-nums text-slate-900">{formatNumber(totalItems)}</td>
             <td className="py-3 text-right tabular-nums text-slate-900">{formatCurrency(totalRev)}</td>
             <td className="py-3 pl-4 text-slate-500 text-xs">100%</td>
           </tr>
