@@ -308,26 +308,46 @@ export default async (req: Request, _context: Context) => {
   }
 
   // ─── Heat-map hora×día durante la Hot Week (Meta + Google combinados) ──
+  // Prefiere snapshot congelado (hot_sale_2026_hourly) si existe — sino cae
+  // a las tablas live (que son rolling 14 días). El snapshot lo crea el
+  // script scripts/snapshot-hot-sale-hourly.ts cuando termina el evento.
   async function heatmap() {
-    const rows = await sql`
-      SELECT EXTRACT(DOW FROM snapshot_date)::int AS dow, hour,
-             SUM(spend)::numeric    AS spend,
-             SUM(purchases)::bigint AS purchases,
-             SUM(revenue)::numeric  AS revenue
-      FROM (
-        SELECT snapshot_date, hour, spend, purchases, revenue
-        FROM meta_ads_hourly
-        WHERE client_id = ${clientId}
-          AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
-        UNION ALL
-        SELECT snapshot_date, hour, spend, conversions::bigint AS purchases, conv_value AS revenue
-        FROM google_ads_hourly
-        WHERE client_id = ${clientId}
-          AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
-      ) AS combined
-      GROUP BY dow, hour
-      ORDER BY dow, hour
-    `;
+    const [{ frozen_rows }] = await sql`
+      SELECT COUNT(*)::int AS frozen_rows
+      FROM hot_sale_2026_hourly
+      WHERE snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+    ` as any[];
+
+    const rows = Number(frozen_rows) > 0
+      ? await sql`
+          SELECT EXTRACT(DOW FROM snapshot_date)::int AS dow, hour,
+                 SUM(spend)::numeric    AS spend,
+                 SUM(purchases)::bigint AS purchases,
+                 SUM(revenue)::numeric  AS revenue
+          FROM hot_sale_2026_hourly
+          WHERE snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+          GROUP BY dow, hour
+          ORDER BY dow, hour
+        `
+      : await sql`
+          SELECT EXTRACT(DOW FROM snapshot_date)::int AS dow, hour,
+                 SUM(spend)::numeric    AS spend,
+                 SUM(purchases)::bigint AS purchases,
+                 SUM(revenue)::numeric  AS revenue
+          FROM (
+            SELECT snapshot_date, hour, spend, purchases, revenue
+            FROM meta_ads_hourly
+            WHERE client_id = ${clientId}
+              AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+            UNION ALL
+            SELECT snapshot_date, hour, spend, conversions::bigint AS purchases, conv_value AS revenue
+            FROM google_ads_hourly
+            WHERE client_id = ${clientId}
+              AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+          ) AS combined
+          GROUP BY dow, hour
+          ORDER BY dow, hour
+        `;
     type Cell = { dow: number; hour: number; dayLabel: string; spend: number; purchases: number; revenue: number; roas: number };
     const cells: Cell[] = rows.map((r: any) => {
       const spend = Number(r.spend ?? 0);

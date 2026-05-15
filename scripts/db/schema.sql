@@ -266,6 +266,22 @@ CREATE TABLE IF NOT EXISTS traffic_channels (
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_channels ON traffic_channels (client_id, snapshot_date);
 
+-- ─── Snapshot Hot Sale 2026 — hourly congelado ─────────────────────────────
+-- Las tablas meta_ads_hourly / google_ads_hourly son rolling 14 días. Para
+-- preservar el heat-map del informe Hot Sale más allá de 14 días después
+-- del evento, copiamos los datos del rango 11-17 may 2026 acá.
+-- Una fila por (date, hour) con Meta + Google combinados.
+CREATE TABLE IF NOT EXISTS hot_sale_2026_hourly (
+  id            SERIAL PRIMARY KEY,
+  snapshot_date DATE NOT NULL,
+  hour          INT  NOT NULL,            -- 0-23
+  spend         NUMERIC(18,2),
+  revenue       NUMERIC(18,2),
+  purchases     BIGINT,
+  frozen_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (snapshot_date, hour)
+);
+
 -- ─── Pacing presupuestario ─────────────────────────────────────────────────
 -- Budget mensual por cliente. Una fila por mes (primer día del mes).
 CREATE TABLE IF NOT EXISTS client_budgets (
