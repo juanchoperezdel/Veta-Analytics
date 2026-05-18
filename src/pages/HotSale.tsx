@@ -23,7 +23,8 @@ type ChannelKpis = {
 type RangeKpis = { start: string; end: string; total: ChannelKpis; meta: ChannelKpis; google: ChannelKpis };
 type DailyPoint = {
   date: string; spend: number; revenue: number; purchases: number;
-  metaSpend: number; metaRevenue: number; googleSpend: number; googleRevenue: number;
+  metaSpend: number; metaRevenue: number; metaPurchases: number;
+  googleSpend: number; googleRevenue: number; googlePurchases: number;
   isHotWeek: boolean;
 };
 type Route = { route: string; revenue: number; items: number; purchases: number };
@@ -521,29 +522,86 @@ function DailyCurveChart({ daily, hotWeek }: { daily: DailyPoint[]; hotWeek: { s
   }
   const chartData = daily.map(d => ({ ...d, dateLabel: d.date.slice(8, 10) + '/' + d.date.slice(5, 7) }));
   return (
-    <div className="h-72">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-          <ReferenceArea x1={chartData.find(d => d.date === hotWeek.start)?.dateLabel}
-                         x2={chartData.find(d => d.date === hotWeek.end)?.dateLabel}
-                         fill="#fb923c" fillOpacity={0.08} label={{ value: 'Hot Week', position: 'insideTop', fill: '#c2410c', fontSize: 11, fontWeight: 600 }} />
-          <XAxis dataKey="dateLabel" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
-          <YAxis yAxisId="money" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCompact(v)} />
-          <YAxis yAxisId="purchases" orientation="right" tick={{ fontSize: 11, fill: '#8b5cf6' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatNumber(v)} />
-          <Tooltip
-            formatter={(value: number, name: string) => {
-              if (name === 'Compras') return [formatNumber(value), name];
-              return [formatCurrency(value), name];
-            }}
-            labelFormatter={(label) => `Día ${label}`}
-            contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
-          />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Line yAxisId="money"     type="monotone" dataKey="revenue"   name="Ingresos"  stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-          <Line yAxisId="money"     type="monotone" dataKey="spend"     name="Inversión" stroke="#f97316" strokeWidth={2}   dot={{ r: 2 }} />
-          <Line yAxisId="purchases" type="monotone" dataKey="purchases" name="Compras"   stroke="#8b5cf6" strokeWidth={2}   dot={{ r: 2 }} strokeDasharray="4 2" />
-        </LineChart>
-      </ResponsiveContainer>
+    <>
+      <div className="h-72">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <ReferenceArea x1={chartData.find(d => d.date === hotWeek.start)?.dateLabel}
+                           x2={chartData.find(d => d.date === hotWeek.end)?.dateLabel}
+                           fill="#fb923c" fillOpacity={0.08} label={{ value: 'Hot Week', position: 'insideTop', fill: '#c2410c', fontSize: 11, fontWeight: 600 }} />
+            <XAxis dataKey="dateLabel" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
+            <YAxis yAxisId="money" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCompact(v)} />
+            <YAxis yAxisId="purchases" orientation="right" tick={{ fontSize: 11, fill: '#8b5cf6' }} axisLine={false} tickLine={false} tickFormatter={(v) => formatNumber(v)} />
+            <Tooltip
+              formatter={(value: number, name: string) => {
+                if (name === 'Compras') return [formatNumber(value), name];
+                return [formatCurrency(value), name];
+              }}
+              labelFormatter={(label) => `Día ${label}`}
+              contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
+            />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Line yAxisId="money"     type="monotone" dataKey="revenue"   name="Ingresos"  stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+            <Line yAxisId="money"     type="monotone" dataKey="spend"     name="Inversión" stroke="#f97316" strokeWidth={2}   dot={{ r: 2 }} />
+            <Line yAxisId="purchases" type="monotone" dataKey="purchases" name="Compras"   stroke="#8b5cf6" strokeWidth={2}   dot={{ r: 2 }} strokeDasharray="4 2" />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <DailyCpaTable daily={daily} />
+    </>
+  );
+}
+
+function DailyCpaTable({ daily }: { daily: DailyPoint[] }) {
+  return (
+    <div className="mt-4 pt-4 border-t border-slate-100 overflow-x-auto">
+      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">CPA por día y plataforma</h4>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-slate-400">
+            <th className="text-left py-1 font-semibold pr-3 sticky left-0 bg-white">Plataforma</th>
+            {daily.map(d => (
+              <th key={d.date} className={cn(
+                "text-right py-1 px-2 font-semibold tabular-nums",
+                d.isHotWeek && "text-orange-600"
+              )}>
+                {d.date.slice(8, 10)}/{d.date.slice(5, 7)}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr className="border-t border-slate-50">
+            <td className="py-1.5 pr-3 sticky left-0 bg-white">
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase text-blue-700 bg-blue-50">Meta</span>
+            </td>
+            {daily.map(d => {
+              const cpa = d.metaPurchases > 0 ? d.metaSpend / d.metaPurchases : 0;
+              return (
+                <td key={d.date} className="text-right py-1.5 px-2 tabular-nums text-slate-700">
+                  {cpa > 0 ? formatCompact(cpa) : '—'}
+                </td>
+              );
+            })}
+          </tr>
+          <tr className="border-t border-slate-50">
+            <td className="py-1.5 pr-3 sticky left-0 bg-white">
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase text-emerald-700 bg-emerald-50">Google</span>
+            </td>
+            {daily.map(d => {
+              const cpa = d.googlePurchases > 0 ? d.googleSpend / d.googlePurchases : 0;
+              return (
+                <td key={d.date} className="text-right py-1.5 px-2 tabular-nums text-slate-700">
+                  {cpa > 0 ? formatCompact(cpa) : '—'}
+                </td>
+              );
+            })}
+          </tr>
+        </tbody>
+      </table>
+      <div className="text-[10px] text-slate-400 italic mt-2">
+        CPA = inversión / compras (por plataforma). Columnas en naranja son días de la Hot Week.
+      </div>
     </div>
   );
 }

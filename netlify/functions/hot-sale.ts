@@ -82,23 +82,25 @@ export default async (req: Request, _context: Context) => {
              SUM(spend)::numeric    AS spend,
              SUM(revenue)::numeric  AS revenue,
              SUM(purchases)::bigint AS purchases,
-             SUM(meta_spend)::numeric    AS meta_spend,
-             SUM(meta_revenue)::numeric  AS meta_revenue,
-             SUM(google_spend)::numeric  AS google_spend,
-             SUM(google_revenue)::numeric AS google_revenue
+             SUM(meta_spend)::numeric        AS meta_spend,
+             SUM(meta_revenue)::numeric      AS meta_revenue,
+             SUM(meta_purchases)::bigint     AS meta_purchases,
+             SUM(google_spend)::numeric      AS google_spend,
+             SUM(google_revenue)::numeric    AS google_revenue,
+             SUM(google_purchases)::bigint   AS google_purchases
       FROM (
         SELECT snapshot_date,
                spend, revenue, purchases,
-               spend AS meta_spend, revenue AS meta_revenue,
-               0::numeric AS google_spend, 0::numeric AS google_revenue
+               spend AS meta_spend, revenue AS meta_revenue, purchases AS meta_purchases,
+               0::numeric AS google_spend, 0::numeric AS google_revenue, 0::bigint AS google_purchases
         FROM meta_ads_campaigns
         WHERE client_id = ${clientId}
           AND snapshot_date BETWEEN ${BASE_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
         UNION ALL
         SELECT snapshot_date,
                spend, revenue, carts AS purchases,
-               0::numeric AS meta_spend, 0::numeric AS meta_revenue,
-               spend AS google_spend, revenue AS google_revenue
+               0::numeric AS meta_spend, 0::numeric AS meta_revenue, 0::bigint AS meta_purchases,
+               spend AS google_spend, revenue AS google_revenue, carts::bigint AS google_purchases
         FROM google_ads_campaigns
         WHERE client_id = ${clientId}
           AND snapshot_date BETWEEN ${BASE_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
@@ -110,14 +112,16 @@ export default async (req: Request, _context: Context) => {
       const date = r.date.slice(0, 10);
       return {
         date,
-        spend:         Number(r.spend ?? 0),
-        revenue:       Number(r.revenue ?? 0),
-        purchases:     Number(r.purchases ?? 0),
-        metaSpend:     Number(r.meta_spend ?? 0),
-        metaRevenue:   Number(r.meta_revenue ?? 0),
-        googleSpend:   Number(r.google_spend ?? 0),
-        googleRevenue: Number(r.google_revenue ?? 0),
-        isHotWeek:     date >= HOT_WEEK_2026.start && date <= HOT_WEEK_2026.end,
+        spend:           Number(r.spend ?? 0),
+        revenue:         Number(r.revenue ?? 0),
+        purchases:       Number(r.purchases ?? 0),
+        metaSpend:       Number(r.meta_spend ?? 0),
+        metaRevenue:     Number(r.meta_revenue ?? 0),
+        metaPurchases:   Number(r.meta_purchases ?? 0),
+        googleSpend:     Number(r.google_spend ?? 0),
+        googleRevenue:   Number(r.google_revenue ?? 0),
+        googlePurchases: Number(r.google_purchases ?? 0),
+        isHotWeek:       date >= HOT_WEEK_2026.start && date <= HOT_WEEK_2026.end,
       };
     });
   }
