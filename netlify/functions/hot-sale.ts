@@ -209,6 +209,10 @@ export default async (req: Request, _context: Context) => {
   }
 
   // ─── Top creatives Meta durante la Hot Week ────────────────────────────
+  // Devolvemos TODOS los ads disponibles (no limit) para que el frontend
+  // pueda: (a) mostrar top 12 en la galería, (b) filtrar por campaña al
+  // hacer drill-down desde la tabla de Campañas.
+  // El sync trae top 60 ads por spend, así que igual hay un techo natural.
   async function topCreatives() {
     const rows = await sql`
       SELECT ad_id,
@@ -227,7 +231,6 @@ export default async (req: Request, _context: Context) => {
       GROUP BY ad_id
       HAVING SUM(spend) > 0
       ORDER BY SUM(revenue) DESC
-      LIMIT 12
     `;
     return rows.map((r: any) => {
       const spend = Number(r.spend ?? 0);

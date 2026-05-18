@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
   ArrowUpRight, ArrowDownRight, Flame, TrendingUp,
-  MapPin, Users, Smartphone, Image as ImageIcon, Clock, Globe,
+  MapPin, Users, Smartphone, Image as ImageIcon, Clock, Globe, X,
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceArea as RechartsReferenceArea, Legend } from 'recharts';
 
@@ -232,7 +232,7 @@ function Report({ data }: { data: HotSaleData }) {
                 <p className="text-xs text-slate-500 mt-1">Las piezas que más vendieron durante el evento</p>
               </div>
             </div>
-            <CreativesGrid creatives={weekly.creatives} />
+            <CreativesGrid creatives={weekly.creatives.slice(0, 12)} />
           </Card>
 
           {/* Top campañas (Meta + Google) */}
@@ -241,10 +241,13 @@ function Report({ data }: { data: HotSaleData }) {
               <TrendingUp size={18} className="text-slate-500" />
               <div>
                 <h3 className="text-base font-bold text-slate-900">Campañas que más vendieron — Hot Week</h3>
-                <p className="text-xs text-slate-500 mt-1">Top campañas Meta + Google ordenadas por revenue durante el evento</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Top campañas Meta + Google ordenadas por revenue durante el evento.
+                  <span className="ml-1 text-slate-400">Click en una fila Meta para ver los ads.</span>
+                </p>
               </div>
             </div>
-            <CampaignsTable campaigns={weekly.campaigns} />
+            <CampaignsTable campaigns={weekly.campaigns} creatives={weekly.creatives} />
           </Card>
         </section>
 
@@ -789,42 +792,138 @@ function CreativesGrid({ creatives }: { creatives: Creative[] }) {
   );
 }
 
-function CampaignsTable({ campaigns }: { campaigns: Campaign[] }) {
+function CampaignsTable({ campaigns, creatives }: { campaigns: Campaign[]; creatives: Creative[] }) {
+  const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null);
+
   if (campaigns.length === 0) {
     return <div className="py-8 text-center text-sm text-slate-400">Aún no hay campañas con data en la Hot Week.</div>;
   }
+
+  // Set de campañas Meta que tienen ads disponibles en creatives (para saber
+  // cuáles son drilleables — si no hay ads no tiene sentido hacerlas clickeables)
+  const metaCampaignsWithAds = new Set(creatives.map(c => c.campaignName));
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase">
-            <th className="text-left py-2 font-semibold">Campaña</th>
-            <th className="text-left py-2 font-semibold">Canal</th>
-            <th className="text-right py-2 font-semibold">Inversión</th>
-            <th className="text-right py-2 font-semibold">Ingresos</th>
-            <th className="text-right py-2 font-semibold">Compras</th>
-            <th className="text-right py-2 font-semibold">Por $1</th>
-          </tr>
-        </thead>
-        <tbody>
-          {campaigns.map((c, i) => (
-            <tr key={i} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/50">
-              <td className="py-2 font-medium text-slate-800 max-w-md truncate" title={c.name}>{c.name}</td>
-              <td className="py-2">
-                <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded uppercase",
-                  c.channel === 'Meta' ? "text-blue-700 bg-blue-50" : "text-emerald-700 bg-emerald-50"
-                )}>{c.channel}</span>
-              </td>
-              <td className="py-2 text-right tabular-nums text-slate-600">{formatCurrency(c.spend)}</td>
-              <td className="py-2 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(c.revenue)}</td>
-              <td className="py-2 text-right tabular-nums text-slate-600">{formatNumber(c.purchases)}</td>
-              <td className={cn("py-2 text-right tabular-nums font-bold",
-                c.roas >= 3 ? "text-emerald-700" : c.roas >= 1.5 ? "text-amber-700" : c.roas > 0 ? "text-orange-700" : "text-slate-400"
-              )}>{c.roas > 0 ? `$${c.roas.toFixed(2)}` : '—'}</td>
+    <>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-xs text-slate-500 uppercase">
+              <th className="text-left py-2 font-semibold">Campaña</th>
+              <th className="text-left py-2 font-semibold">Canal</th>
+              <th className="text-right py-2 font-semibold">Inversión</th>
+              <th className="text-right py-2 font-semibold">Ingresos</th>
+              <th className="text-right py-2 font-semibold">Compras</th>
+              <th className="text-right py-2 font-semibold">Por $1</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {campaigns.map((c, i) => {
+              const isDrillable = c.channel === 'Meta' && metaCampaignsWithAds.has(c.name);
+              return (
+                <tr
+                  key={i}
+                  className={cn(
+                    "border-b border-slate-50 last:border-0",
+                    isDrillable
+                      ? "hover:bg-blue-50/50 cursor-pointer"
+                      : "hover:bg-slate-50/50"
+                  )}
+                  onClick={() => isDrillable && setSelectedCampaign(c.name)}
+                  title={isDrillable ? "Ver ads de esta campaña" : undefined}
+                >
+                  <td className={cn("py-2 font-medium max-w-md truncate", isDrillable ? "text-blue-700 underline decoration-blue-200 underline-offset-2" : "text-slate-800")}>{c.name}</td>
+                  <td className="py-2">
+                    <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded uppercase",
+                      c.channel === 'Meta' ? "text-blue-700 bg-blue-50" : "text-emerald-700 bg-emerald-50"
+                    )}>{c.channel}</span>
+                  </td>
+                  <td className="py-2 text-right tabular-nums text-slate-600">{formatCurrency(c.spend)}</td>
+                  <td className="py-2 text-right tabular-nums font-semibold text-slate-900">{formatCurrency(c.revenue)}</td>
+                  <td className="py-2 text-right tabular-nums text-slate-600">{formatNumber(c.purchases)}</td>
+                  <td className={cn("py-2 text-right tabular-nums font-bold",
+                    c.roas >= 3 ? "text-emerald-700" : c.roas >= 1.5 ? "text-amber-700" : c.roas > 0 ? "text-orange-700" : "text-slate-400"
+                  )}>{c.roas > 0 ? `$${c.roas.toFixed(2)}` : '—'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {selectedCampaign && (
+        <CampaignAdsModal
+          campaignName={selectedCampaign}
+          ads={creatives.filter(c => c.campaignName === selectedCampaign)}
+          onClose={() => setSelectedCampaign(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function CampaignAdsModal({ campaignName, ads, onClose }: {
+  campaignName: string; ads: Creative[]; onClose: () => void;
+}) {
+  // Cerrar con Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const totalSpend     = ads.reduce((s, a) => s + a.spend, 0);
+  const totalRevenue   = ads.reduce((s, a) => s + a.revenue, 0);
+  const totalPurchases = ads.reduce((s, a) => s + a.purchases, 0);
+  const avgRoas = totalSpend > 0 ? totalRevenue / totalSpend : 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 p-6 border-b border-slate-100">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase text-blue-700 bg-blue-50">Meta</span>
+              <span className="text-xs text-slate-500">Ads de la campaña</span>
+            </div>
+            <h2 className="text-base font-bold text-slate-900 break-all">{campaignName}</h2>
+            <div className="flex flex-wrap gap-4 mt-3 text-xs">
+              <div><span className="text-slate-500">Ads:</span> <strong className="text-slate-900">{ads.length}</strong></div>
+              <div><span className="text-slate-500">Inversión:</span> <strong className="text-slate-900">{formatCurrency(totalSpend)}</strong></div>
+              <div><span className="text-slate-500">Ingresos:</span> <strong className="text-slate-900">{formatCurrency(totalRevenue)}</strong></div>
+              <div><span className="text-slate-500">Compras:</span> <strong className="text-slate-900">{formatNumber(totalPurchases)}</strong></div>
+              <div><span className="text-slate-500">Por $1 invertido:</span> <strong className={cn(
+                avgRoas >= 3 ? "text-emerald-700" : avgRoas >= 1.5 ? "text-amber-700" : "text-orange-700"
+              )}>${avgRoas.toFixed(2)}</strong></div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="shrink-0 p-2 hover:bg-slate-100 rounded-lg transition-colors"
+            title="Cerrar (Esc)"
+          >
+            <X size={18} className="text-slate-500" />
+          </button>
+        </div>
+
+        {/* Body — galería de ads */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {ads.length === 0 ? (
+            <div className="py-12 text-center text-sm text-slate-400">
+              No hay ads de esta campaña en el rango Hot Week. El sync de Meta solo guarda top 60 ads por spend rolling 7 días.
+            </div>
+          ) : (
+            <CreativesGrid creatives={ads} />
+          )}
+        </div>
+      </div>
     </div>
   );
 }
