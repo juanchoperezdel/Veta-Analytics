@@ -266,11 +266,13 @@ CREATE TABLE IF NOT EXISTS traffic_channels (
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_channels ON traffic_channels (client_id, snapshot_date);
 
--- ─── Snapshot Hot Sale 2026 — hourly congelado ─────────────────────────────
--- Las tablas meta_ads_hourly / google_ads_hourly son rolling 14 días. Para
--- preservar el heat-map del informe Hot Sale más allá de 14 días después
--- del evento, copiamos los datos del rango 11-17 may 2026 acá.
--- Una fila por (date, hour) con Meta + Google combinados.
+-- ─── Snapshots Hot Sale 2026 — congelados ──────────────────────────────────
+-- Las tablas meta_ads_hourly (14d), meta_ads_creatives (7d) y
+-- meta_ads_breakdowns (30d) son rolling. Para preservar el informe Hot Sale
+-- más allá de esas ventanas, copiamos los datos del rango 11-17 may 2026
+-- a tablas snapshot dedicadas.
+
+-- Hora×día (Meta + Google combinados)
 CREATE TABLE IF NOT EXISTS hot_sale_2026_hourly (
   id            SERIAL PRIMARY KEY,
   snapshot_date DATE NOT NULL,
@@ -280,6 +282,47 @@ CREATE TABLE IF NOT EXISTS hot_sale_2026_hourly (
   purchases     BIGINT,
   frozen_at     TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (snapshot_date, hour)
+);
+
+-- Creatives de Meta (ad-level con thumbnails) congelados del Hot Week
+CREATE TABLE IF NOT EXISTS hot_sale_2026_creatives (
+  id               SERIAL PRIMARY KEY,
+  snapshot_date    DATE NOT NULL,
+  ad_id            TEXT NOT NULL,
+  ad_name          TEXT,
+  campaign_id      TEXT,
+  campaign_name    TEXT,
+  thumbnail_url    TEXT,
+  effective_status TEXT,
+  spend            NUMERIC(18,2),
+  impressions      BIGINT,
+  clicks           BIGINT,
+  reach            BIGINT,
+  purchases        BIGINT,
+  revenue          NUMERIC(18,2),
+  cpa              NUMERIC(18,2),
+  roas             NUMERIC(10,2),
+  ctr              NUMERIC(10,4),
+  frozen_at        TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (snapshot_date, ad_id)
+);
+
+-- Breakdowns demográficos de Meta (age/gender/region/placement) del Hot Week
+CREATE TABLE IF NOT EXISTS hot_sale_2026_breakdowns (
+  id              SERIAL PRIMARY KEY,
+  snapshot_date   DATE NOT NULL,
+  dimension_type  TEXT NOT NULL,
+  dimension_value TEXT NOT NULL,
+  spend           NUMERIC(18,2),
+  impressions     BIGINT,
+  clicks          BIGINT,
+  reach           BIGINT,
+  purchases       BIGINT,
+  revenue         NUMERIC(18,2),
+  cpa             NUMERIC(18,2),
+  roas            NUMERIC(10,2),
+  frozen_at       TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (snapshot_date, dimension_type, dimension_value)
 );
 
 -- ─── Pacing presupuestario ─────────────────────────────────────────────────

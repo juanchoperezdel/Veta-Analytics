@@ -209,29 +209,52 @@ export default async (req: Request, _context: Context) => {
   }
 
   // ─── Top creatives Meta durante la Hot Week ────────────────────────────
-  // Devolvemos TODOS los ads disponibles (no limit) para que el frontend
-  // pueda: (a) mostrar top 12 en la galería, (b) filtrar por campaña al
-  // hacer drill-down desde la tabla de Campañas.
-  // El sync trae top 60 ads por spend, así que igual hay un techo natural.
+  // Prefiere snapshot hot_sale_2026_creatives si existe — sino cae a la
+  // tabla live (rolling 7 días). El snapshot se llena con
+  // scripts/snapshot-hot-sale.ts.
   async function topCreatives() {
-    const rows = await sql`
-      SELECT ad_id,
-             MAX(ad_name)          AS ad_name,
-             MAX(campaign_name)    AS campaign_name,
-             MAX(thumbnail_url)    AS thumbnail_url,
-             MAX(effective_status) AS status,
-             SUM(spend)::numeric        AS spend,
-             SUM(impressions)::bigint   AS impressions,
-             SUM(clicks)::bigint        AS clicks,
-             SUM(purchases)::bigint     AS purchases,
-             SUM(revenue)::numeric      AS revenue
-      FROM meta_ads_creatives
-      WHERE client_id = ${clientId}
-        AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
-      GROUP BY ad_id
-      HAVING SUM(spend) > 0
-      ORDER BY SUM(revenue) DESC
-    `;
+    const [{ frozen_rows }] = await sql`
+      SELECT COUNT(*)::int AS frozen_rows
+      FROM hot_sale_2026_creatives
+      WHERE snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+    ` as any[];
+
+    const rows = Number(frozen_rows) > 0
+      ? await sql`
+          SELECT ad_id,
+                 MAX(ad_name)          AS ad_name,
+                 MAX(campaign_name)    AS campaign_name,
+                 MAX(thumbnail_url)    AS thumbnail_url,
+                 MAX(effective_status) AS status,
+                 SUM(spend)::numeric        AS spend,
+                 SUM(impressions)::bigint   AS impressions,
+                 SUM(clicks)::bigint        AS clicks,
+                 SUM(purchases)::bigint     AS purchases,
+                 SUM(revenue)::numeric      AS revenue
+          FROM hot_sale_2026_creatives
+          WHERE snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+          GROUP BY ad_id
+          HAVING SUM(spend) > 0
+          ORDER BY SUM(revenue) DESC
+        `
+      : await sql`
+          SELECT ad_id,
+                 MAX(ad_name)          AS ad_name,
+                 MAX(campaign_name)    AS campaign_name,
+                 MAX(thumbnail_url)    AS thumbnail_url,
+                 MAX(effective_status) AS status,
+                 SUM(spend)::numeric        AS spend,
+                 SUM(impressions)::bigint   AS impressions,
+                 SUM(clicks)::bigint        AS clicks,
+                 SUM(purchases)::bigint     AS purchases,
+                 SUM(revenue)::numeric      AS revenue
+          FROM meta_ads_creatives
+          WHERE client_id = ${clientId}
+            AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+          GROUP BY ad_id
+          HAVING SUM(spend) > 0
+          ORDER BY SUM(revenue) DESC
+        `;
     return rows.map((r: any) => {
       const spend = Number(r.spend ?? 0);
       const revenue = Number(r.revenue ?? 0);
@@ -258,23 +281,44 @@ export default async (req: Request, _context: Context) => {
 
   // ─── Top campañas (Meta + Google) durante la Hot Week ──────────────────
   async function topCampaigns() {
-    // Meta: agregamos por campaign_name desde meta_ads_creatives (que tiene
-    // el nombre). Solo cubre top 60 ads por spend pero suele ser representativo.
+    // Meta: prefiere snapshot hot_sale_2026_creatives si existe, sino live.
+    const [{ frozen_rows }] = await sql`
+      SELECT COUNT(*)::int AS frozen_rows
+      FROM hot_sale_2026_creatives
+      WHERE snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+    ` as any[];
+
+    const metaSource = Number(frozen_rows) > 0
+      ? sql`
+          SELECT campaign_name AS name,
+                 SUM(spend)::numeric        AS spend,
+                 SUM(revenue)::numeric      AS revenue,
+                 SUM(purchases)::bigint     AS purchases,
+                 SUM(impressions)::bigint   AS impressions,
+                 SUM(clicks)::bigint        AS clicks
+          FROM hot_sale_2026_creatives
+          WHERE snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+            AND campaign_name IS NOT NULL
+          GROUP BY campaign_name
+          HAVING SUM(spend) > 0
+        `
+      : sql`
+          SELECT campaign_name AS name,
+                 SUM(spend)::numeric        AS spend,
+                 SUM(revenue)::numeric      AS revenue,
+                 SUM(purchases)::bigint     AS purchases,
+                 SUM(impressions)::bigint   AS impressions,
+                 SUM(clicks)::bigint        AS clicks
+          FROM meta_ads_creatives
+          WHERE client_id = ${clientId}
+            AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+            AND campaign_name IS NOT NULL
+          GROUP BY campaign_name
+          HAVING SUM(spend) > 0
+        `;
+
     const [metaRows, googleRows] = await Promise.all([
-      sql`
-        SELECT campaign_name AS name,
-               SUM(spend)::numeric        AS spend,
-               SUM(revenue)::numeric      AS revenue,
-               SUM(purchases)::bigint     AS purchases,
-               SUM(impressions)::bigint   AS impressions,
-               SUM(clicks)::bigint        AS clicks
-        FROM meta_ads_creatives
-        WHERE client_id = ${clientId}
-          AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
-          AND campaign_name IS NOT NULL
-        GROUP BY campaign_name
-        HAVING SUM(spend) > 0
-      `,
+      metaSource,
       sql`
         SELECT name,
                SUM(spend)::numeric        AS spend,
@@ -385,21 +429,43 @@ export default async (req: Request, _context: Context) => {
   }
 
   // ─── Demografía Meta durante la Hot Week ───────────────────────────────
+  // Prefiere snapshot hot_sale_2026_breakdowns si existe — sino cae a la
+  // tabla live (rolling 30 días).
   async function demographics() {
-    const rows = await sql`
-      SELECT dimension_type, dimension_value,
-             SUM(spend)::numeric       AS spend,
-             SUM(impressions)::bigint  AS impressions,
-             SUM(reach)::bigint        AS reach,
-             SUM(purchases)::bigint    AS purchases,
-             SUM(revenue)::numeric     AS revenue
-      FROM meta_ads_breakdowns
-      WHERE client_id = ${clientId}
-        AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
-      GROUP BY dimension_type, dimension_value
-      HAVING SUM(spend) > 0
-      ORDER BY dimension_type, SUM(spend) DESC
-    `;
+    const [{ frozen_rows }] = await sql`
+      SELECT COUNT(*)::int AS frozen_rows
+      FROM hot_sale_2026_breakdowns
+      WHERE snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+    ` as any[];
+
+    const rows = Number(frozen_rows) > 0
+      ? await sql`
+          SELECT dimension_type, dimension_value,
+                 SUM(spend)::numeric       AS spend,
+                 SUM(impressions)::bigint  AS impressions,
+                 SUM(reach)::bigint        AS reach,
+                 SUM(purchases)::bigint    AS purchases,
+                 SUM(revenue)::numeric     AS revenue
+          FROM hot_sale_2026_breakdowns
+          WHERE snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+          GROUP BY dimension_type, dimension_value
+          HAVING SUM(spend) > 0
+          ORDER BY dimension_type, SUM(spend) DESC
+        `
+      : await sql`
+          SELECT dimension_type, dimension_value,
+                 SUM(spend)::numeric       AS spend,
+                 SUM(impressions)::bigint  AS impressions,
+                 SUM(reach)::bigint        AS reach,
+                 SUM(purchases)::bigint    AS purchases,
+                 SUM(revenue)::numeric     AS revenue
+          FROM meta_ads_breakdowns
+          WHERE client_id = ${clientId}
+            AND snapshot_date BETWEEN ${HOT_WEEK_2026.start} AND ${HOT_WEEK_2026.end}
+          GROUP BY dimension_type, dimension_value
+          HAVING SUM(spend) > 0
+          ORDER BY dimension_type, SUM(spend) DESC
+        `;
     const byDim: Record<string, any[]> = { age: [], gender: [], region: [], publisher_platform: [] };
     for (const r of rows) {
       const spend = Number(r.spend ?? 0);
