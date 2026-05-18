@@ -540,9 +540,10 @@ function DailyCurveChart({ daily, hotWeek }: { daily: DailyPoint[]; hotWeek: { s
             contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
           />
           <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Line yAxisId="money"     type="monotone" dataKey="revenue"   name="Ingresos"  stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-          <Line yAxisId="money"     type="monotone" dataKey="spend"     name="Inversión" stroke="#f97316" strokeWidth={2}   dot={{ r: 2 }} />
-          <Line yAxisId="purchases" type="monotone" dataKey="purchases" name="Compras"   stroke="#8b5cf6" strokeWidth={2}   dot={{ r: 2 }} strokeDasharray="4 2" />
+          <Line yAxisId="money"     type="monotone" dataKey="revenue"     name="Ingresos"      stroke="#10b981" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+          <Line yAxisId="money"     type="monotone" dataKey="metaSpend"   name="Inversión Meta"   stroke="#3b82f6" strokeWidth={2}   dot={{ r: 2 }} />
+          <Line yAxisId="money"     type="monotone" dataKey="googleSpend" name="Inversión Google" stroke="#f97316" strokeWidth={2}   dot={{ r: 2 }} />
+          <Line yAxisId="purchases" type="monotone" dataKey="purchases"   name="Compras"       stroke="#8b5cf6" strokeWidth={2}   dot={{ r: 2 }} strokeDasharray="4 2" />
         </LineChart>
       </ResponsiveContainer>
     </div>
