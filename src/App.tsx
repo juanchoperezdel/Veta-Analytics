@@ -11,7 +11,7 @@ import Login from './pages/Login';
 import Pulse from './pages/Pulse';
 import Funnel from './pages/Funnel';
 import Seasonality from './pages/Seasonality';
-import HotSale from './pages/HotSale';
+import SmartwayPublic from './pages/SmartwayPublic';
 import { getToken } from './lib/api';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -23,8 +23,10 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/hot-sale-andesmar-2026" element={<HotSale />} />
-        <Route path="/" element={<Navigate to="/andesmar/pulse" replace />} />
+        {/* Reporte público de Smartway — link secreto sin login (gate por oscuridad).
+            Para revocar acceso, cambiar este path y redeployar. */}
+        <Route path="/smartway-reporte-2026" element={<SmartwayPublic />} />
+        <Route path="/" element={<Navigate to="/smartway-reporte-2026" replace />} />
 
         <Route path="/:clientSlug" element={<RequireAuth><AppLayout /></RequireAuth>}>
           <Route index element={<Navigate to="pulse" replace />} />

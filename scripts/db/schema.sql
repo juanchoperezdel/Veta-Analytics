@@ -25,6 +25,17 @@ INSERT INTO clients (id, slug, name, logo_initial) VALUES
   ('1', 'andesmar', 'Andesmar Turismo', 'A')
 ON CONFLICT (id) DO NOTHING;
 
+-- Cuentas de ads por cliente (multi-cliente). Las credenciales (token Meta,
+-- service-account Google) siguen siendo globales (env vars); acá guardamos solo
+-- el ID de cada cuenta para que el sync sepa qué consultar por cliente. Si una
+-- columna es NULL el sync hace fallback a la env var global (no rompe Andesmar).
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS meta_ad_account_id     TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS google_ads_customer_id TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS ga4_property_id        TEXT;
+-- active=false → el sync lo saltea (cliente dado de baja), pero su historial en
+-- Neon se conserva. El frontend igual puede seguir leyéndolo si hace falta.
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+
 -- Snapshot de KPIs de negocio (GA4)
 CREATE TABLE IF NOT EXISTS business_kpis (
   id                    SERIAL PRIMARY KEY,

@@ -21,6 +21,32 @@ function ga4DateToISO(d: string): string {
 
 // ─── Meta Ads ───────────────────────────────────────────────────────────────
 
+// Conversión primaria de una cuenta Meta. Toma el primer action_type de la lista de
+// prioridad con valor > 0 → elige UN solo evento (evita doble conteo entre fb_pixel /
+// omni / onsite). Cubre e-commerce (purchase) y lead-gen (leads / registros / mensajes),
+// así una cuenta como Smartway (sin compras) reporta sus leads en vez de 0.
+const META_CONV_PRIORITY = [
+  'purchase',
+  'offsite_conversion.fb_pixel_purchase',
+  'omni_purchase',
+  'lead',
+  'offsite_conversion.fb_pixel_lead',
+  'onsite_web_lead',
+  'onsite_conversion.lead_grouped',
+  'complete_registration',
+  'omni_complete_registration',
+  'offsite_conversion.fb_pixel_complete_registration',
+  'onsite_conversion.messaging_conversation_started_7d',
+];
+function extractMetaConversions(actions: any[]): number {
+  if (!actions?.length) return 0;
+  for (const t of META_CONV_PRIORITY) {
+    const f = actions.find((a: any) => a.action_type === t);
+    if (f && Number(f.value) > 0) return Number(f.value);
+  }
+  return 0;
+}
+
 async function syncMetaAds(clientId: string, adAccountId: string, accessToken: string) {
   const { since, until } = dateRange(30);
   const fields = [
@@ -70,9 +96,9 @@ async function syncMetaAds(clientId: string, adAccountId: string, accessToken: s
     const objective = row.objective ?? null;
     const status    = statusByCampaign.get(row.campaign_id) ?? null;
     const spend     = parseFloat(row.spend ?? '0');
-    // Usamos action_type='purchase' que es el rollup total de Meta — coincide con lo que el
-    // cliente ve en el Ads Manager. El diagnóstico confirmó que no duplica con fb_pixel/omni/onsite.
-    const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
+    // Conversión primaria de la cuenta (purchase para e-commerce; lead/registro/mensaje
+    // para lead-gen). Se guarda en la columna `purchases` (= conversiones primarias).
+    const purchases = extractMetaConversions(row.actions ?? []);
     const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
     const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
     const roas      = spend > 0 ? revenue / spend : 0;
@@ -418,7 +444,8 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
     const impressions = parseInt(row.impressions ?? '0');
     const clicks    = parseInt(row.clicks ?? '0');
     const reach     = parseInt(row.reach ?? '0');
-    const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
+    // Conversión primaria por ad (purchase / lead / registro / mensaje) — ver extractMetaConversions.
+    const purchases = extractMetaConversions(row.actions ?? []);
     const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
     const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
     const roas      = spend > 0 ? revenue / spend : 0;
@@ -869,51 +896,76 @@ function secondsToMMSS(seconds: number): string {
 async function main() {
   console.log(`\nVeta Analytics sync — ${new Date().toISOString()}`);
 
-  const clients = await sql`SELECT id, slug FROM clients`;
+  // Multi-cliente: cada fila trae sus IDs de cuenta. Las credenciales (token Meta,
+  // service-account Google) siguen siendo globales (env). Si un ID está NULL en la DB,
+  // se hace fallback a la env var global (mantiene a Andesmar funcionando como antes).
+  const clients = await sql`
+    SELECT id, slug, meta_ad_account_id, google_ads_customer_id, ga4_property_id
+    FROM clients
+    WHERE active = true
+  `;
 
   for (const client of clients) {
     console.log(`\n→ Syncing client: ${client.slug}`);
 
-    try {
-      await syncMetaAds(client.id, process.env.META_AD_ACCOUNT_ID!, process.env.META_ACCESS_TOKEN!);
-    } catch (e) { console.error(`  ✗ Meta Ads:`, e); }
+    // IDs de cuenta por cliente desde la DB (sembrados con scripts/seed-clients.ts).
+    // SIN fallback a env vars: en multi-cliente un fallback global filtraría la cuenta
+    // de otro cliente (ej: GA4 de un cliente bajo el client_id de otro). Si el ID es
+    // NULL, se saltea esa plataforma para ese cliente.
+    const metaAcct = client.meta_ad_account_id     || null;
+    const gAdsCust = client.google_ads_customer_id || null;
+    const ga4Prop  = client.ga4_property_id        || null;
+    const metaTok  = process.env.META_ACCESS_TOKEN!;
 
-    try {
-      await syncMetaCreatives(client.id, process.env.META_AD_ACCOUNT_ID!, process.env.META_ACCESS_TOKEN!);
-    } catch (e) { console.error(`  ✗ Meta Creatives:`, e); }
+    if (!metaAcct) {
+      console.log(`  ⊘ Sin meta_ad_account_id — se saltea Meta para ${client.slug}`);
+    } else {
+      try {
+        await syncMetaAds(client.id, metaAcct, metaTok);
+      } catch (e) { console.error(`  ✗ Meta Ads:`, e); }
 
-    try {
-      await syncMetaBreakdowns(client.id, process.env.META_AD_ACCOUNT_ID!, process.env.META_ACCESS_TOKEN!);
-    } catch (e) { console.error(`  ✗ Meta Breakdowns:`, e); }
+      try {
+        await syncMetaCreatives(client.id, metaAcct, metaTok);
+      } catch (e) { console.error(`  ✗ Meta Creatives:`, e); }
 
-    try {
-      await syncGoogleAds(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
-    } catch (e) { console.error(`  ✗ Google Ads:`, e); }
+      try {
+        await syncMetaBreakdowns(client.id, metaAcct, metaTok);
+      } catch (e) { console.error(`  ✗ Meta Breakdowns:`, e); }
 
-    try {
-      await syncGoogleAdsSearchTerms(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
-    } catch (e) { console.error(`  ✗ Google Ads Search Terms:`, e); }
+      try {
+        await syncMetaHourly(client.id, metaAcct, metaTok);
+      } catch (e) { console.error(`  ✗ Meta Hourly:`, e); }
+    }
 
-    try {
-      await syncMetaHourly(client.id, process.env.META_AD_ACCOUNT_ID!, process.env.META_ACCESS_TOKEN!);
-    } catch (e) { console.error(`  ✗ Meta Hourly:`, e); }
+    if (!gAdsCust) {
+      console.log(`  ⊘ Sin google_ads_customer_id — se saltea Google para ${client.slug}`);
+    } else {
+      try {
+        await syncGoogleAds(client.id, gAdsCust);
+      } catch (e) { console.error(`  ✗ Google Ads:`, e); }
 
-    try {
-      await syncGoogleAdsHourly(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
-    } catch (e) { console.error(`  ✗ Google Ads Hourly:`, e); }
+      try {
+        await syncGoogleAdsSearchTerms(client.id, gAdsCust);
+      } catch (e) { console.error(`  ✗ Google Ads Search Terms:`, e); }
+
+      try {
+        await syncGoogleAdsHourly(client.id, gAdsCust);
+      } catch (e) { console.error(`  ✗ Google Ads Hourly:`, e); }
+    }
 
     // YouTube deshabilitado por ahora
-    // try {
-    //   await syncYouTube(client.id, process.env.GOOGLE_ADS_CUSTOMER_ID!);
-    // } catch (e) { console.error(`  ✗ YouTube:`, e); }
 
-    try {
-      await syncGA4(client.id, process.env.GA4_PROPERTY_ID!);
-    } catch (e: any) {
-      // GA4 puede tener token expirado (OAuth en modo Testing expira a los 7 días).
-      // No frenamos el resto del sync — los demás canales siguen actualizándose.
-      const isAuth = String(e?.message ?? '').includes('invalid_grant') || String(e?.message ?? '').includes('expired');
-      console.error(`  ✗ GA4${isAuth ? ' (token EXPIRADO — refrescar GA4_SERVICE_ACCOUNT_JSON)' : ''}:`, e?.message ?? e);
+    if (!ga4Prop) {
+      console.log(`  ⊘ Sin ga4_property_id — se saltea GA4 para ${client.slug}`);
+    } else {
+      try {
+        await syncGA4(client.id, ga4Prop);
+      } catch (e: any) {
+        // GA4 puede tener token expirado (OAuth en modo Testing expira a los 7 días).
+        // No frenamos el resto del sync — los demás canales siguen actualizándose.
+        const isAuth = String(e?.message ?? '').includes('invalid_grant') || String(e?.message ?? '').includes('expired');
+        console.error(`  ✗ GA4${isAuth ? ' (token EXPIRADO — refrescar GA4_SERVICE_ACCOUNT_JSON)' : ''}:`, e?.message ?? e);
+      }
     }
   }
 
