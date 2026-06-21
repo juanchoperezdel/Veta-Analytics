@@ -207,6 +207,8 @@ CREATE TABLE IF NOT EXISTS meta_ads_creatives (
   UNIQUE (client_id, snapshot_date, ad_id)
 );
 ALTER TABLE meta_ads_creatives ALTER COLUMN ctr TYPE NUMERIC(10,4);
+-- landing_page_view = paso del funnel (visita a la landing) por ad
+ALTER TABLE meta_ads_creatives ADD COLUMN IF NOT EXISTS landing_page_view BIGINT;
 
 -- Breakdowns demográficos / placements de Meta Ads
 -- dimension_type ∈ {age, gender, region, publisher_platform}

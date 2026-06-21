@@ -375,7 +375,9 @@ async function syncGoogleAdsSearchTerms(clientId: string, customerId: string) {
 // el dashboard solo muestra los TOP por spend, no histórico largo.
 
 async function syncMetaCreatives(clientId: string, adAccountId: string, accessToken: string) {
-  const { since, until } = dateRange(7);
+  // 30 días para poder armar el funnel ad-level del mes (impresiones→clicks→visitas→leads)
+  // y segmentar por vertical (el vertical va en el ad_name: Kit4 / Orbatix / etc.).
+  const { since, until } = dateRange(30);
   const fields = [
     'ad_id', 'ad_name',
     'campaign_id', 'campaign_name',
@@ -447,6 +449,8 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
     // Conversión primaria por ad (purchase / lead / registro / mensaje) — ver extractMetaConversions.
     const purchases = extractMetaConversions(row.actions ?? []);
     const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
+    // Visita a la landing (paso intermedio del funnel)
+    const lpv       = parseInt((row.actions ?? []).find((a: any) => a.action_type === 'landing_page_view')?.value ?? '0');
     const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
     const roas      = spend > 0 ? revenue / spend : 0;
     const ctr       = parseFloat(row.ctr ?? '0');
@@ -456,19 +460,20 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
       INSERT INTO meta_ads_creatives
         (client_id, snapshot_date, ad_id, ad_name, campaign_id, campaign_name,
          thumbnail_url, effective_status,
-         spend, impressions, clicks, reach, purchases, revenue, cpa, roas, ctr)
+         spend, impressions, clicks, reach, purchases, revenue, cpa, roas, ctr, landing_page_view)
       VALUES
         (${clientId}, ${date}, ${row.ad_id}, ${row.ad_name}, ${row.campaign_id}, ${row.campaign_name},
          ${info?.thumb ?? null}, ${info?.status ?? null},
          ${spend}, ${impressions}, ${clicks}, ${reach}, ${purchases}, ${revenue},
-         ${cpa}, ${roas}, ${ctr})
+         ${cpa}, ${roas}, ${ctr}, ${lpv})
       ON CONFLICT (client_id, snapshot_date, ad_id)
       DO UPDATE SET
         ad_name = EXCLUDED.ad_name, campaign_id = EXCLUDED.campaign_id, campaign_name = EXCLUDED.campaign_name,
         thumbnail_url = EXCLUDED.thumbnail_url, effective_status = EXCLUDED.effective_status,
         spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
         reach = EXCLUDED.reach, purchases = EXCLUDED.purchases, revenue = EXCLUDED.revenue,
-        cpa = EXCLUDED.cpa, roas = EXCLUDED.roas, ctr = EXCLUDED.ctr, synced_at = NOW()
+        cpa = EXCLUDED.cpa, roas = EXCLUDED.roas, ctr = EXCLUDED.ctr,
+        landing_page_view = EXCLUDED.landing_page_view, synced_at = NOW()
     `;
   }
 

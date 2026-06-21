@@ -2,29 +2,61 @@ import type { Context } from '@netlify/functions';
 import { sql, corsHeaders, errorResponse } from './_db';
 
 // Dashboard público de Smartway — endpoint SIN auth (gate por oscuridad, como hot-sale).
-// El slug está fijado server-side: este endpoint NUNCA devuelve data de otro cliente.
-// Para revocar el acceso, cambiar el path de la página en App.tsx y redeployar.
+// Slug fijo server-side: nunca devuelve data de otro cliente. Revocar = cambiar el path
+// de la página en App.tsx y redeployar.
 //
-// Smartway es lead-gen (no e-commerce): la métrica primaria es CONVERSIONES (leads/
-// registros/mensajes — ver extractMetaConversions en el sync), no ventas/ROAS. Por eso
-// el KPI headline es CPL (costo por conversión), no ROAS.
+// Smartway es lead-gen: la conversión primaria son LEADS (no ventas). El dashboard arma
+// el FUNNEL Impresiones → Clicks → Visitas LP → Leads, con costo por etapa, segmentado por
+// VERTICAL (el vertical va en el ad_name: Kit 4.0 / Orbatix / Smartway) y por tipo de campaña.
 
 const SLUG = 'smartway';
-const DAYS = 30;
 
-type Health = { status: 'scale' | 'ok' | 'optimize' | 'pause'; reason: string };
+// Fechas en JS (string ISO) — evita la aritmética de fechas con parámetros en Neon,
+// que rompe ("operator does not exist: date >= integer"). Los strings de fecha sí
+// se comparan bien contra la columna date.
+function iso(d: Date) { return d.toISOString().split('T')[0]; }
+function todayISO() { return iso(new Date()); }
+function daysAgoISO(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); }
+function shiftMonthISO(dateStr: string, months: number) {
+  const d = new Date(dateStr + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + months); return iso(d);
+}
 
-// Salud por reglas simples de lead-gen (sin ROAS): mira gasto y conversiones de 7d.
-function scoreHealth(last7Spend: number, last7Conv: number, accountCpl: number): Health {
-  if (last7Spend < 5000) return { status: 'ok', reason: 'Bajo gasto en 7d, no es prioritaria.' };
-  if (last7Conv === 0) return { status: 'pause', reason: `0 conversiones con $${last7Spend.toFixed(0)} en 7d. Revisar urgente.` };
-  const cpl = last7Spend / last7Conv;
-  if (accountCpl > 0 && cpl <= accountCpl * 0.7) return { status: 'scale', reason: `CPL $${cpl.toFixed(0)} (mejor que el promedio). Considerá subir presupuesto.` };
-  if (accountCpl > 0 && cpl >= accountCpl * 1.5) return { status: 'optimize', reason: `CPL $${cpl.toFixed(0)} (peor que el promedio). Revisar creativos o segmentación.` };
-  return { status: 'ok', reason: `CPL $${cpl.toFixed(0)} en línea con el promedio.` };
+// El vertical se infiere del nombre del anuncio (ej: "Ad1_Kit4", "Ad2_Orbatix").
+function classifyVertical(adName: string): string {
+  const n = (adName || '').toLowerCase();
+  if (/kit\s*4|kit4/.test(n)) return 'Kit 4.0';
+  if (/orbatix/.test(n)) return 'Orbatix';
+  return 'Smartway';
 }
 
 function delta(c: number, p: number) { return (!p || p === 0) ? 0 : (c - p) / p; }
+
+type Agg = { spend: number; impressions: number; clicks: number; lpv: number; leads: number };
+function emptyAgg(): Agg { return { spend: 0, impressions: 0, clicks: 0, lpv: 0, leads: 0 }; }
+function addAgg(a: Agg, r: { spend: number; impressions: number; clicks: number; lpv: number; leads: number }) {
+  a.spend += r.spend; a.impressions += r.impressions; a.clicks += r.clicks; a.lpv += r.lpv; a.leads += r.leads;
+}
+
+// Construye las 4 etapas del funnel con tasa de paso y costo por etapa.
+function buildFunnel(a: Agg) {
+  const cpm = a.impressions > 0 ? (a.spend / a.impressions) * 1000 : 0;
+  return {
+    spend: a.spend,
+    impressions: a.impressions,
+    clicks: a.clicks,
+    visits: a.lpv,
+    leads: a.leads,
+    ctr: a.impressions > 0 ? a.clicks / a.impressions : 0,
+    cpm,
+    cpc: a.clicks > 0 ? a.spend / a.clicks : 0,
+    costPerVisit: a.lpv > 0 ? a.spend / a.lpv : 0,
+    cpl: a.leads > 0 ? a.spend / a.leads : 0,
+    // tasas de paso entre etapas
+    clickRate: a.impressions > 0 ? a.clicks / a.impressions : 0,
+    visitRate: a.clicks > 0 ? Math.min(1, a.lpv / a.clicks) : 0,
+    leadRate: a.lpv > 0 ? a.leads / a.lpv : (a.clicks > 0 ? a.leads / a.clicks : 0),
+  };
+}
 
 export default async (req: Request, _context: Context) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
@@ -33,177 +65,123 @@ export default async (req: Request, _context: Context) => {
   if (!client) return errorResponse('Client not found', 404);
   const cid = client.id;
 
-  // ─── META: KPIs headline (spend + conversiones + reach, rango completo) ──────
-  const [metaCurr] = await sql`
-    SELECT COALESCE(SUM(spend),0)::numeric spend,
-           COALESCE(SUM(purchases),0)::bigint conv,
-           COALESCE(SUM(reach),0)::bigint reach
-    FROM meta_ads_campaigns
-    WHERE client_id = ${cid} AND snapshot_date >= CURRENT_DATE - 29`;
-  const [metaPrev] = await sql`
-    SELECT COALESCE(SUM(spend),0)::numeric spend, COALESCE(SUM(purchases),0)::bigint conv
-    FROM meta_ads_campaigns
-    WHERE client_id = ${cid}
-      AND snapshot_date BETWEEN (CURRENT_DATE - 29)::date - INTERVAL '1 month'
-                            AND (CURRENT_DATE)::date - INTERVAL '1 month'`;
-  // Impresiones/clicks de Meta: la tabla de campañas no los guarda → se suman del
-  // breakdown por edad (cobertura ~total de la cuenta). Best-effort para CTR.
-  const [metaImpr] = await sql`
-    SELECT COALESCE(SUM(impressions),0)::bigint impressions, COALESCE(SUM(clicks),0)::bigint clicks
-    FROM meta_ads_breakdowns
-    WHERE client_id = ${cid} AND dimension_type = 'age'
-      AND snapshot_date >= CURRENT_DATE - 29`;
+  // Rango de fechas (default últimos 30 días). Delta vs el mismo rango un mes atrás.
+  const url = new URL(req.url);
+  const end = url.searchParams.get('end') || todayISO();
+  const start = url.searchParams.get('start') || daysAgoISO(29);
+  const prevStart = shiftMonthISO(start, -1);
+  const prevEnd = shiftMonthISO(end, -1);
 
-  const metaSpend = Number(metaCurr.spend), metaConv = Number(metaCurr.conv);
-  const metaImpressions = Number(metaImpr?.impressions ?? 0), metaClicks = Number(metaImpr?.clicks ?? 0);
-  const meta = {
-    spend: metaSpend,
-    conversions: metaConv,
-    cpl: metaConv > 0 ? metaSpend / metaConv : 0,
-    reach: Number(metaCurr.reach),
-    impressions: metaImpressions,
-    clicks: metaClicks,
-    ctr: metaImpressions > 0 ? metaClicks / metaImpressions : 0,
-    deltas: {
-      spend: delta(metaSpend, Number(metaPrev.spend)),
-      conversions: delta(metaConv, Number(metaPrev.conv)),
-    },
-  };
-
-  // ─── GOOGLE: KPIs headline (la tabla guarda impresiones/clicks/ctr) ──────────
-  const [gCurr] = await sql`
-    SELECT COALESCE(SUM(spend),0)::numeric spend, COALESCE(SUM(carts),0)::bigint conv,
-           COALESCE(SUM(impressions),0)::bigint impressions, COALESCE(SUM(clicks),0)::bigint clicks
-    FROM google_ads_campaigns
-    WHERE client_id = ${cid} AND snapshot_date >= CURRENT_DATE - 29`;
-  const [gPrev] = await sql`
-    SELECT COALESCE(SUM(spend),0)::numeric spend, COALESCE(SUM(carts),0)::bigint conv
-    FROM google_ads_campaigns
-    WHERE client_id = ${cid}
-      AND snapshot_date BETWEEN (CURRENT_DATE - 29)::date - INTERVAL '1 month'
-                            AND (CURRENT_DATE)::date - INTERVAL '1 month'`;
-  const gSpend = Number(gCurr.spend), gConv = Number(gCurr.conv);
-  const gImpr = Number(gCurr.impressions), gClicks = Number(gCurr.clicks);
-  const google = {
-    spend: gSpend,
-    conversions: gConv,
-    cpl: gConv > 0 ? gSpend / gConv : 0,
-    impressions: gImpr,
-    clicks: gClicks,
-    ctr: gImpr > 0 ? gClicks / gImpr : 0,
-    deltas: {
-      spend: delta(gSpend, Number(gPrev.spend)),
-      conversions: delta(gConv, Number(gPrev.conv)),
-    },
-    hasData: gSpend > 0,
-  };
-
-  const totalSpend = metaSpend + gSpend;
-  const totalConv = metaConv + gConv;
-  const total = {
-    spend: totalSpend,
-    conversions: totalConv,
-    cpl: totalConv > 0 ? totalSpend / totalConv : 0,
-  };
-
-  // ─── CAMPAÑAS Meta (agregadas en el rango) + salud ──────────────────────────
-  const metaCampRows = await sql`
-    SELECT campaign_id, MAX(segment) name, MAX(effective_status) status,
-           SUM(spend)::numeric spend, SUM(purchases)::bigint conv
-    FROM meta_ads_campaigns
-    WHERE client_id = ${cid} AND snapshot_date >= CURRENT_DATE - 29
-    GROUP BY campaign_id ORDER BY SUM(spend) DESC`;
-  const metaLast7 = await sql`
-    SELECT campaign_id, SUM(spend)::numeric spend, SUM(purchases)::bigint conv
-    FROM meta_ads_campaigns
-    WHERE client_id = ${cid} AND snapshot_date >= CURRENT_DATE - 6
-    GROUP BY campaign_id`;
-  const metaL7 = new Map(metaLast7.map((r: any) => [r.campaign_id, r]));
-  const accountCplMeta = meta.cpl;
-  const metaCampaigns = metaCampRows.map((c: any) => {
-    const spend = Number(c.spend), conv = Number(c.conv);
-    const l7 = metaL7.get(c.campaign_id) as any;
-    return {
-      id: c.campaign_id, name: c.name ?? '(sin nombre)', platform: 'meta' as const,
-      status: c.status, spend, conversions: conv,
-      cpl: conv > 0 ? spend / conv : 0,
-      health: scoreHealth(Number(l7?.spend ?? 0), Number(l7?.conv ?? 0), accountCplMeta),
-    };
-  });
-
-  // ─── CAMPAÑAS Google (agregadas) + salud ────────────────────────────────────
-  const gCampRows = await sql`
-    SELECT campaign_id, MAX(name) name,
-           SUM(spend)::numeric spend, SUM(carts)::bigint conv,
-           SUM(clicks)::numeric / NULLIF(SUM(impressions)::numeric,0) ctr
-    FROM google_ads_campaigns
-    WHERE client_id = ${cid} AND snapshot_date >= CURRENT_DATE - 29
-    GROUP BY campaign_id ORDER BY SUM(spend) DESC`;
-  const gLast7 = await sql`
-    SELECT campaign_id, SUM(spend)::numeric spend, SUM(carts)::bigint conv
-    FROM google_ads_campaigns
-    WHERE client_id = ${cid} AND snapshot_date >= CURRENT_DATE - 6
-    GROUP BY campaign_id`;
-  const gL7 = new Map(gLast7.map((r: any) => [r.campaign_id, r]));
-  const accountCplG = google.cpl;
-  const googleCampaigns = gCampRows.map((c: any) => {
-    const spend = Number(c.spend), conv = Number(c.conv);
-    const l7 = gL7.get(c.campaign_id) as any;
-    return {
-      id: c.campaign_id, name: c.name ?? '(sin nombre)', platform: 'google' as const,
-      status: null, spend, conversions: conv, ctr: Number(c.ctr ?? 0),
-      cpl: conv > 0 ? spend / conv : 0,
-      health: scoreHealth(Number(l7?.spend ?? 0), Number(l7?.conv ?? 0), accountCplG),
-    };
-  });
-
-  // ─── MEJORES / PEORES ANUNCIOS (Meta, ad-level con thumbnails, 14 días) ──────
+  // ─── Datos ad-level (30d) — fuente del funnel + verticales + por anuncio ─────
   const adRows = await sql`
     SELECT ad_id, MAX(ad_name) ad_name, MAX(campaign_name) campaign_name,
            MAX(thumbnail_url) thumbnail_url, MAX(effective_status) status,
            SUM(spend)::numeric spend, SUM(impressions)::bigint impressions,
-           SUM(clicks)::bigint clicks, SUM(purchases)::bigint conv
+           SUM(clicks)::bigint clicks, COALESCE(SUM(landing_page_view),0)::bigint lpv,
+           SUM(purchases)::bigint leads
     FROM meta_ads_creatives
-    WHERE client_id = ${cid} AND snapshot_date >= CURRENT_DATE - 13
-    GROUP BY ad_id
-    HAVING SUM(spend) > 0
-    ORDER BY SUM(spend) DESC`;
+    WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
+    GROUP BY ad_id`;
+
   const ads = adRows.map((a: any) => {
-    const spend = Number(a.spend), conv = Number(a.conv);
-    const impr = Number(a.impressions), clicks = Number(a.clicks);
+    const spend = Number(a.spend), impressions = Number(a.impressions), clicks = Number(a.clicks);
+    const lpv = Number(a.lpv), leads = Number(a.leads);
     return {
       adId: a.ad_id, adName: a.ad_name ?? '(sin nombre)', campaignName: a.campaign_name ?? '',
-      thumbnailUrl: a.thumbnail_url ?? null, status: a.status,
-      spend, conversions: conv, impressions: impr, clicks,
-      ctr: impr > 0 ? clicks / impr : 0,
-      cpl: conv > 0 ? spend / conv : 0,
+      vertical: classifyVertical(a.ad_name), thumbnailUrl: a.thumbnail_url ?? null, status: a.status,
+      spend, impressions, clicks, lpv, leads,
+      ctr: impressions > 0 ? clicks / impressions : 0,
+      cpl: leads > 0 ? spend / leads : 0,
     };
   });
-  // Mejores: con conversiones, menor CPL; desempate por CTR. Peores: con gasto
-  // relevante y 0 conversiones (plata sin resultado), ordenados por gasto.
-  const SPEND_FLOOR = 3000;
-  const withConv = ads.filter(a => a.conversions > 0).sort((a, b) => a.cpl - b.cpl);
-  const noConv = ads.filter(a => a.conversions === 0 && a.spend >= SPEND_FLOOR).sort((a, b) => b.spend - a.spend);
-  const best = (withConv.length ? withConv : [...ads].sort((a, b) => b.ctr - a.ctr)).slice(0, 6);
-  const worst = noConv.slice(0, 6);
 
-  // ─── DEMOGRAFÍA (Meta, top por gasto en cada dimensión) ──────────────────────
+  // Agregados: overall + por vertical
+  const overallAgg = emptyAgg();
+  const vertAggs: Record<string, Agg> = {};
+  for (const a of ads) {
+    addAgg(overallAgg, a);
+    (vertAggs[a.vertical] ??= emptyAgg());
+    addAgg(vertAggs[a.vertical], a);
+  }
+
+  const overall = buildFunnel(overallAgg);
+
+  const VERT_ORDER = ['Orbatix', 'Smartway', 'Kit 4.0'];
+  const verticals = Object.keys(vertAggs)
+    .sort((x, y) => (VERT_ORDER.indexOf(x) + 99) - (VERT_ORDER.indexOf(y) + 99) || vertAggs[y].spend - vertAggs[x].spend)
+    .map(name => ({
+      name,
+      ...buildFunnel(vertAggs[name]),
+      ads: ads.filter(a => a.vertical === name).sort((p, q) => q.spend - p.spend)
+        .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, spend: a.spend,
+                     impressions: a.impressions, clicks: a.clicks, lpv: a.lpv, leads: a.leads,
+                     ctr: a.ctr, cpl: a.cpl })),
+    }));
+
+  // ─── Por tipo de campaña (estructura: Leads / Advantage / Remarketing / ...) ──
+  const campRows = await sql`
+    SELECT segment, SUM(spend)::numeric spend, SUM(purchases)::bigint leads
+    FROM meta_ads_campaigns
+    WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
+    GROUP BY segment ORDER BY SUM(spend) DESC`;
+  const campaignTypes = campRows.map((c: any) => {
+    const spend = Number(c.spend), leads = Number(c.leads);
+    return { name: c.segment ?? '(sin nombre)', spend, leads, cpl: leads > 0 ? spend / leads : 0 };
+  });
+
+  // Delta de leads/inversión vs mismo rango mes anterior (de la tabla de campañas)
+  const [curr] = await sql`
+    SELECT COALESCE(SUM(spend),0)::numeric spend, COALESCE(SUM(purchases),0)::bigint leads
+    FROM meta_ads_campaigns WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}`;
+  const [prev] = await sql`
+    SELECT COALESCE(SUM(spend),0)::numeric spend, COALESCE(SUM(purchases),0)::bigint leads
+    FROM meta_ads_campaigns WHERE client_id = ${cid}
+      AND snapshot_date BETWEEN ${prevStart} AND ${prevEnd}`;
+  const deltas = { spend: delta(Number(curr.spend), Number(prev.spend)), leads: delta(Number(curr.leads), Number(prev.leads)) };
+
+  // ─── Mejores / peores anuncios (global, 30d) ─────────────────────────────────
+  const SPEND_FLOOR = 3000;
+  const withLeads = ads.filter(a => a.leads > 0).sort((a, b) => a.cpl - b.cpl);
+  const noLeads = ads.filter(a => a.leads === 0 && a.spend >= SPEND_FLOOR).sort((a, b) => b.spend - a.spend);
+  const best = (withLeads.length ? withLeads : [...ads].sort((a, b) => b.ctr - a.ctr)).slice(0, 6)
+    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl,
+                 spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
+  const worst = noLeads.slice(0, 6)
+    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl,
+                 spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
+
+  // ─── Google (campaign-level; vacío hasta el primer sync en la nube) ──────────
+  const gRows = await sql`
+    SELECT name, SUM(spend)::numeric spend, SUM(impressions)::bigint impressions,
+           SUM(clicks)::bigint clicks, SUM(carts)::bigint leads
+    FROM google_ads_campaigns
+    WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
+    GROUP BY name ORDER BY SUM(spend) DESC`;
+  const gAgg = emptyAgg();
+  for (const r of gRows) addAgg(gAgg, { spend: Number(r.spend), impressions: Number(r.impressions), clicks: Number(r.clicks), lpv: 0, leads: Number(r.leads) });
+  const google = {
+    hasData: gAgg.spend > 0,
+    ...buildFunnel(gAgg),
+    campaigns: gRows.map((r: any) => {
+      const spend = Number(r.spend), leads = Number(r.leads);
+      return { name: r.name, vertical: classifyVertical(r.name), spend, clicks: Number(r.clicks),
+               impressions: Number(r.impressions), leads, cpl: leads > 0 ? spend / leads : 0 };
+    }),
+  };
+
+  // ─── Demografía (Meta, top por gasto) ────────────────────────────────────────
   const demoRows = await sql`
     SELECT dimension_type, dimension_value,
-           SUM(spend)::numeric spend, SUM(purchases)::bigint conv, SUM(impressions)::bigint impressions
+           SUM(spend)::numeric spend, SUM(purchases)::bigint leads
     FROM meta_ads_breakdowns
-    WHERE client_id = ${cid} AND snapshot_date >= CURRENT_DATE - 29
-    GROUP BY dimension_type, dimension_value
-    HAVING SUM(spend) > 0`;
+    WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
+    GROUP BY dimension_type, dimension_value HAVING SUM(spend) > 0`;
   const demographics: Record<string, any[]> = { age: [], gender: [], region: [], publisher_platform: [] };
   for (const r of demoRows) {
     const t = r.dimension_type;
-    if (!demographics[t]) demographics[t] = [];
-    const spend = Number(r.spend), conv = Number(r.conv);
-    demographics[t].push({
-      value: r.dimension_value, spend, conversions: conv,
-      cpl: conv > 0 ? spend / conv : 0, impressions: Number(r.impressions),
-    });
+    (demographics[t] ??= []);
+    const spend = Number(r.spend), leads = Number(r.leads);
+    demographics[t].push({ value: r.dimension_value, spend, leads, cpl: leads > 0 ? spend / leads : 0 });
   }
   for (const k of Object.keys(demographics)) {
     demographics[k].sort((a, b) => b.spend - a.spend);
@@ -211,10 +189,12 @@ export default async (req: Request, _context: Context) => {
   }
 
   const body = {
-    config: { name: client.name, currency: 'ARS', days: DAYS, generatedAt: new Date().toISOString() },
-    kpis: { total, meta, google },
-    campaigns: [...metaCampaigns, ...googleCampaigns].sort((a, b) => b.spend - a.spend),
+    config: { name: client.name, currency: 'ARS', period: { start, end }, generatedAt: new Date().toISOString() },
+    overall, deltas,
+    verticals,
+    campaignTypes,
     ads: { best, worst },
+    google,
     demographics,
   };
 

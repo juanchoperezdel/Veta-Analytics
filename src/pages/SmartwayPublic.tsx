@@ -1,46 +1,56 @@
 import { useEffect, useState, Fragment, type ReactNode } from 'react';
 import {
-  TrendingUp, TrendingDown, Target, DollarSign,
-  Trophy, AlertTriangle, Users, Loader2,
+  TrendingUp, TrendingDown, Target, Trophy, AlertTriangle, Users, Loader2,
+  Eye, MousePointerClick, MapPin, Flag,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
 import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
 
 const BASE = import.meta.env.DEV ? 'http://localhost:8888/.netlify/functions' : '/.netlify/functions';
 
+function initialRange(): DateRange {
+  const end = new Date().toISOString().split('T')[0];
+  const s = new Date(); s.setDate(s.getDate() - 29);
+  return { start: s.toISOString().split('T')[0], end, label: 'Últimos 30 días' };
+}
+
 // ─── Tipos ───────────────────────────────────────────────────────────────────
-type Health = { status: 'scale' | 'ok' | 'optimize' | 'pause'; reason: string };
-type MetaKpis = { spend: number; conversions: number; cpl: number; reach: number; impressions: number; clicks: number; ctr: number; deltas: { spend: number; conversions: number } };
-type GoogleKpis = { spend: number; conversions: number; cpl: number; impressions: number; clicks: number; ctr: number; deltas: { spend: number; conversions: number }; hasData: boolean };
-type Campaign = { id: string; name: string; platform: 'meta' | 'google'; status: string | null; spend: number; conversions: number; cpl: number; ctr?: number; health: Health };
-type Ad = { adId: string; adName: string; campaignName: string; thumbnailUrl: string | null; status: string | null; spend: number; conversions: number; impressions: number; clicks: number; ctr: number; cpl: number };
-type Demo = { value: string; spend: number; conversions: number; cpl: number; impressions: number };
+type Funnel = {
+  spend: number; impressions: number; clicks: number; visits: number; leads: number;
+  ctr: number; cpm: number; cpc: number; costPerVisit: number; cpl: number;
+  clickRate: number; visitRate: number; leadRate: number;
+};
+type Ad = { adId: string; adName: string; vertical?: string; thumbnailUrl: string | null; spend: number; impressions?: number; clicks?: number; lpv?: number; leads: number; ctr: number; cpl: number };
+type Vertical = Funnel & { name: string; ads: Ad[] };
+type CampaignType = { name: string; spend: number; leads: number; cpl: number };
+type Demo = { value: string; spend: number; leads: number; cpl: number };
+type GoogleData = Funnel & { hasData: boolean; campaigns: { name: string; vertical: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
 type Data = {
   config: { name: string; currency: string; days: number; generatedAt: string };
-  kpis: { total: { spend: number; conversions: number; cpl: number }; meta: MetaKpis; google: GoogleKpis };
-  campaigns: Campaign[];
+  overall: Funnel;
+  deltas: { spend: number; leads: number };
+  verticals: Vertical[];
+  campaignTypes: CampaignType[];
   ads: { best: Ad[]; worst: Ad[] };
+  google: GoogleData;
   demographics: Record<string, Demo[]>;
-};
-
-const HEALTH_LABEL: Record<Health['status'], { label: string; variant: 'success' | 'secondary' | 'high' | 'critical' }> = {
-  scale:    { label: 'Escalar',   variant: 'success' },
-  ok:       { label: 'OK',        variant: 'secondary' },
-  optimize: { label: 'Optimizar', variant: 'high' },
-  pause:    { label: 'Revisar',   variant: 'critical' },
 };
 
 const DEMO_LABELS: Record<string, string> = { age: 'Edad', gender: 'Género', region: 'Región', publisher_platform: 'Placement' };
 const GENDER_ES: Record<string, string> = { male: 'Hombres', female: 'Mujeres', unknown: 'Sin dato' };
+const VERT_COLOR: Record<string, string> = { 'Orbatix': '#7c3aed', 'Smartway': '#0866FF', 'Kit 4.0': '#0e9f6e' };
 
 export default function SmartwayPublic() {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState<DateRange>(initialRange());
 
   useEffect(() => {
-    fetch(`${BASE}/public-smartway`)
+    setLoading(true);
+    setError(null);
+    fetch(`${BASE}/public-smartway?start=${range.start}&end=${range.end}`)
       .then(async r => {
         const json = await r.json();
         if (!r.ok || json.error) { setError(json.error ?? `HTTP ${r.status}`); return; }
@@ -48,101 +58,82 @@ export default function SmartwayPublic() {
       })
       .catch(e => setError(e?.message ?? String(e)))
       .finally(() => setLoading(false));
-  }, []);
+  }, [range.start, range.end]);
 
-  if (loading) return <Status icon={<Loader2 className="animate-spin" />} title="Cargando datos de Smartway…" />;
+  if (loading && !data) return <Status icon={<Loader2 className="animate-spin" />} title="Cargando datos de Smartway…" />;
   if (error || !data) return <Status icon={<AlertTriangle />} title="No pudimos cargar el reporte" subtitle={error ?? ''} isError />;
 
-  const { kpis, campaigns, ads, demographics, config } = data;
+  const { overall, deltas, verticals, campaignTypes, ads, google, demographics, config } = data;
   const updated = new Date(config.generatedAt);
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-slate-900">
-      {/* Header */}
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-veta text-white grid place-items-center font-black text-lg">S</div>
             <div>
               <h1 className="text-lg font-black leading-none">{config.name}</h1>
-              <p className="text-xs text-slate-500 mt-0.5">Reporte de pauta · Meta + Google</p>
+              <p className="text-xs text-slate-500 mt-0.5">Funnel de pauta · Meta + Google</p>
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-[11px] text-slate-500">Últimos {config.days} días</p>
-            <p className="text-[11px] text-slate-400">Actualizado {updated.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} hs</p>
+          <div className="flex items-center gap-3">
+            <DateRangePicker value={range} onChange={setRange} />
+            <p className="text-[11px] text-slate-400 text-right hidden sm:block">Actualizado<br />{updated.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} hs</p>
           </div>
         </div>
+        {loading && <div className="h-0.5 bg-veta/60 animate-pulse" />}
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 py-6 space-y-8">
-        {/* ── Resumen total ── */}
-        <section>
-          <SectionTitle icon={<Target size={15} />} title="Resumen general" hint="Meta + Google combinados" />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <KpiCard label="Inversión total" value={formatCurrency(kpis.total.spend)} icon={<DollarSign size={16} />} />
-            <KpiCard label="Conversiones" value={formatNumber(kpis.total.conversions)} sub="leads / registros / mensajes" icon={<Target size={16} />} />
-            <KpiCard label="Costo por conversión" value={kpis.total.cpl > 0 ? formatCurrency(kpis.total.cpl) : '—'} sub="CPL promedio" icon={<TrendingDown size={16} />} />
-          </div>
+      <main className="mx-auto max-w-6xl px-5 py-6 space-y-9">
+        {/* ── KPIs hero ── */}
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <Kpi label="Inversión" value={formatCurrency(overall.spend)} delta={<DeltaPill value={deltas.spend} />} />
+          <Kpi label="Leads" value={formatNumber(overall.leads)} delta={<DeltaPill value={deltas.leads} />} />
+          <Kpi label="Costo por lead" value={overall.cpl > 0 ? formatCurrency(overall.cpl) : '—'} sub="CPL promedio" />
+          <Kpi label="Costo por visita" value={overall.costPerVisit > 0 ? formatCurrency(overall.costPerVisit) : '—'} sub="a la landing" />
         </section>
 
-        {/* ── Por plataforma ── */}
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <PlatformCard
-            name="Meta Ads" color="#0866FF"
-            spend={kpis.meta.spend} conversions={kpis.meta.conversions} cpl={kpis.meta.cpl}
-            ctr={kpis.meta.ctr} impressions={kpis.meta.impressions}
-            deltas={kpis.meta.deltas}
-          />
-          {kpis.google.hasData ? (
-            <PlatformCard
-              name="Google Ads" color="#34A853"
-              spend={kpis.google.spend} conversions={kpis.google.conversions} cpl={kpis.google.cpl}
-              ctr={kpis.google.ctr} impressions={kpis.google.impressions}
-              deltas={kpis.google.deltas}
-            />
-          ) : (
-            <Card className="p-5 flex flex-col justify-center items-center text-center gap-1">
-              <p className="font-bold text-slate-700">Google Ads</p>
-              <p className="text-sm text-slate-400">Sin datos todavía — se completan en la próxima actualización automática.</p>
-            </Card>
-          )}
-        </section>
-
-        {/* ── Campañas ── */}
+        {/* ── Funnel general ── */}
         <section>
-          <SectionTitle icon={<TrendingUp size={15} />} title="Rendimiento por campaña" hint={`${campaigns.length} campañas activas en el período`} />
-          <Card className="p-0 overflow-hidden">
-            <div className="grid grid-cols-[1.8fr_0.7fr_0.9fr_0.9fr_0.9fr] gap-2 px-4 py-2.5 bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-100">
-              <span>Campaña</span><span>Canal</span><span className="text-right">Inversión</span><span className="text-right">Conv.</span><span className="text-right">Estado</span>
-            </div>
-            {campaigns.map(c => (
-              <div key={`${c.platform}-${c.id}`} className="grid grid-cols-[1.8fr_0.7fr_0.9fr_0.9fr_0.9fr] gap-2 px-4 py-2.5 items-center border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold truncate" title={c.name}>{c.name}</p>
-                  <p className="text-[11px] text-slate-400">{c.conversions > 0 ? `CPL ${formatCurrency(c.cpl)}` : 'Sin conversiones'}</p>
-                </div>
-                <span className={cn('text-[11px] font-bold', c.platform === 'meta' ? 'text-[#0866FF]' : 'text-[#34A853]')}>
-                  {c.platform === 'meta' ? 'Meta' : 'Google'}
-                </span>
-                <span className="text-right text-sm font-semibold tabular-nums">{formatCurrency(c.spend)}</span>
-                <span className="text-right text-sm tabular-nums">{formatNumber(c.conversions)}</span>
-                <span className="text-right" title={c.health.reason}>
-                  <Badge variant={HEALTH_LABEL[c.health.status].variant} className="text-[10px]">
-                    {HEALTH_LABEL[c.health.status].label}
-                  </Badge>
-                </span>
-              </div>
-            ))}
-            {campaigns.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-400">Sin campañas en el período.</p>}
+          <SectionTitle icon={<Target size={15} />} title="Embudo general" hint="Meta · de la impresión al lead" />
+          <Card className="p-5">
+            <FunnelView f={overall} />
           </Card>
         </section>
 
-        {/* ── Mejores anuncios ── */}
+        {/* ── Verticales ── */}
         <section>
-          <SectionTitle icon={<Trophy size={15} className="text-veta" />} title="Anuncios que mejor rinden" hint="Últimos 14 días · menor costo por conversión" />
+          <SectionTitle icon={<Flag size={15} />} title="Por vertical" hint="Kit 4.0 · Orbatix · Smartway (el vertical viene del nombre del anuncio)" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+            {verticals.map(v => <Fragment key={v.name}><VerticalCard v={v} /></Fragment>)}
+          </div>
+        </section>
+
+        {/* ── Por tipo de campaña ── */}
+        <section>
+          <SectionTitle icon={<TrendingUp size={15} />} title="Por campaña" hint="Estructura de cuenta (Leads, Advantage, Remarketing…)" />
+          <Card className="p-0 overflow-hidden">
+            <div className="grid grid-cols-[2fr_1fr_0.8fr_1fr] gap-2 px-4 py-2.5 bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-100">
+              <span>Campaña</span><span className="text-right">Inversión</span><span className="text-right">Leads</span><span className="text-right">CPL</span>
+            </div>
+            {campaignTypes.map(c => (
+              <div key={c.name} className="grid grid-cols-[2fr_1fr_0.8fr_1fr] gap-2 px-4 py-2.5 items-center border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
+                <span className="text-sm font-semibold truncate" title={c.name}>{c.name}</span>
+                <span className="text-right text-sm tabular-nums">{formatCurrency(c.spend)}</span>
+                <span className="text-right text-sm tabular-nums font-semibold">{formatNumber(c.leads)}</span>
+                <span className="text-right text-sm tabular-nums">{c.leads > 0 ? formatCurrency(c.cpl) : '—'}</span>
+              </div>
+            ))}
+            {campaignTypes.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-400">Sin campañas en el período.</p>}
+          </Card>
+        </section>
+
+        {/* ── Mejores / peores anuncios ── */}
+        <section>
+          <SectionTitle icon={<Trophy size={15} className="text-veta" />} title="Anuncios que mejor rinden" hint="Menor costo por lead (30 días)" />
           {ads.best.length === 0 ? (
-            <Card className="p-6 text-center text-sm text-slate-400">Todavía no hay anuncios con conversiones en la ventana.</Card>
+            <Card className="p-6 text-center text-sm text-slate-400">Todavía no hay anuncios con leads en la ventana.</Card>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {ads.best.map(a => <Fragment key={a.adId}><AdCard ad={a} tone="good" /></Fragment>)}
@@ -150,15 +141,34 @@ export default function SmartwayPublic() {
           )}
         </section>
 
-        {/* ── Peores anuncios ── */}
         {ads.worst.length > 0 && (
           <section>
-            <SectionTitle icon={<AlertTriangle size={15} className="text-amber-500" />} title="Anuncios a revisar" hint="Gasto relevante sin conversiones (14 días)" />
+            <SectionTitle icon={<AlertTriangle size={15} className="text-amber-500" />} title="Anuncios a revisar" hint="Gasto relevante sin leads (30 días)" />
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
               {ads.worst.map(a => <Fragment key={a.adId}><AdCard ad={a} tone="bad" /></Fragment>)}
             </div>
           </section>
         )}
+
+        {/* ── Google ── */}
+        <section>
+          <SectionTitle icon={<MousePointerClick size={15} />} title="Google Ads" hint="Búsqueda y display" />
+          {google.hasData ? (
+            <Card className="p-5 space-y-4">
+              <FunnelView f={google} hideVisits />
+              <div className="border-t border-slate-100 pt-3">
+                {google.campaigns.slice(0, 8).map(c => (
+                  <div key={c.name} className="flex items-center justify-between py-1.5 text-sm border-b border-slate-50 last:border-0">
+                    <span className="truncate font-medium" title={c.name}>{c.name}</span>
+                    <span className="text-slate-400 tabular-nums">{formatCurrency(c.spend)} · {formatNumber(c.leads)} leads</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ) : (
+            <Card className="p-6 text-center text-sm text-slate-400">Sin datos de Google todavía — se completan en la próxima actualización automática.</Card>
+          )}
+        </section>
 
         {/* ── Demografía ── */}
         {Object.keys(demographics).some(k => (demographics[k] ?? []).length > 0) && (
@@ -175,98 +185,159 @@ export default function SmartwayPublic() {
         )}
 
         <footer className="pt-4 pb-8 text-center text-[11px] text-slate-400">
-          Datos directos de Meta Ads y Google Ads · Actualización automática cada hora · Veta Analytics
+          Datos directos de Meta Ads y Google Ads · Actualización automática cada hora · Veta Analytics<br />
+          <span className="text-slate-300">Leads calificados y reuniones (HubSpot) — próximamente</span>
         </footer>
       </main>
     </div>
   );
 }
 
-// ─── Subcomponentes ────────────────────────────────────────────────────────────
+// ─── Funnel ────────────────────────────────────────────────────────────────────
+function FunnelView({ f, hideVisits }: { f: Funnel; hideVisits?: boolean }) {
+  const stages = [
+    { key: 'impr', label: 'Impresiones', icon: <Eye size={14} />, value: f.impressions, rate: null as number | null, cost: f.cpm, costLabel: 'CPM' },
+    { key: 'clk', label: 'Clicks', icon: <MousePointerClick size={14} />, value: f.clicks, rate: f.clickRate, cost: f.cpc, costLabel: 'CPC' },
+    ...(hideVisits ? [] : [{ key: 'vis', label: 'Visitas a la landing', icon: <MapPin size={14} />, value: f.visits, rate: f.visitRate, cost: f.costPerVisit, costLabel: '$/visita' }]),
+    { key: 'lead', label: 'Leads', icon: <Target size={14} />, value: f.leads, rate: hideVisits ? (f.clicks > 0 ? f.leads / f.clicks : 0) : f.leadRate, cost: f.cpl, costLabel: 'CPL' },
+  ];
+  const max = Math.max(f.impressions, 1);
+  return (
+    <div className="space-y-2">
+      {stages.map((s, i) => {
+        const w = Math.max(1.5, (s.value / max) * 100);
+        const isLead = s.key === 'lead';
+        return (
+          <div key={s.key}>
+            {i > 0 && s.rate !== null && (
+              <div className="flex items-center gap-1 pl-1 py-0.5 text-[10px] text-slate-400">
+                <TrendingDown size={10} /> {formatPercent(s.rate)} pasa de la etapa anterior
+              </div>
+            )}
+            <div className="flex items-center gap-3">
+              <div className="w-36 shrink-0 flex items-center gap-1.5 text-[12px] font-semibold text-slate-600">
+                <span className="text-slate-400">{s.icon}</span>{s.label}
+              </div>
+              <div className="flex-1 h-8 rounded-lg bg-slate-100 overflow-hidden relative">
+                <div className={cn('h-full rounded-lg flex items-center px-2', isLead ? 'bg-veta' : 'bg-sky-500/85')} style={{ width: `${w}%` }}>
+                  <span className={cn('text-[12px] font-black tabular-nums', w > 12 ? 'text-white' : 'text-slate-700 absolute left-2')}>{formatNumber(s.value)}</span>
+                </div>
+              </div>
+              <div className="w-28 shrink-0 text-right">
+                <p className="text-[12px] font-bold tabular-nums">{s.value > 0 && s.cost > 0 ? formatCurrency(s.cost) : '—'}</p>
+                <p className="text-[10px] text-slate-400">{s.costLabel}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function VerticalCard({ v }: { v: Vertical }) {
+  const color = VERT_COLOR[v.name] ?? '#64748b';
+  const steps = [
+    { label: 'Impr.', value: v.impressions },
+    { label: 'Clicks', value: v.clicks },
+    { label: 'Visitas', value: v.visits },
+    { label: 'Leads', value: v.leads },
+  ];
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
+          <h3 className="font-black">{v.name}</h3>
+        </div>
+        <span className="text-[11px] text-slate-400">{formatCurrency(v.spend)}</span>
+      </div>
+      {/* mini funnel en línea */}
+      <div className="flex items-stretch gap-1 mb-3">
+        {steps.map((s, i) => (
+          <div key={s.label} className="flex-1 text-center">
+            <div className="rounded-md bg-slate-50 py-1.5">
+              <p className="text-sm font-black tabular-nums leading-none">{formatNumber(s.value)}</p>
+              <p className="text-[9px] text-slate-400 mt-0.5">{s.label}</p>
+            </div>
+            {i < steps.length - 1 && <span className="text-slate-300 text-[9px]">▼</span>}
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between text-[12px] mb-3">
+        <span className="text-slate-500">CPL</span>
+        <span className="font-black" style={{ color }}>{v.leads > 0 ? formatCurrency(v.cpl) : 'sin leads'}</span>
+      </div>
+      <div className="space-y-1.5">
+        {v.ads.slice(0, 4).map(a => (
+          <div key={a.adId} className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-md bg-slate-100 overflow-hidden shrink-0 grid place-items-center">
+              {a.thumbnailUrl ? <img src={a.thumbnailUrl} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-[8px] text-slate-300">—</span>}
+            </div>
+            <span className="text-[11px] font-medium truncate flex-1" title={a.adName}>{a.adName}</span>
+            <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{a.leads > 0 ? `${a.leads} lead${a.leads > 1 ? 's' : ''}` : formatPercent(a.ctr)}</span>
+          </div>
+        ))}
+        {v.ads.length === 0 && <p className="text-[11px] text-slate-400 text-center py-2">Sin anuncios</p>}
+      </div>
+    </Card>
+  );
+}
+
+// ─── Subcomponentes ─────────────────────────────────────────────────────────────
 function SectionTitle({ icon, title, hint }: { icon: ReactNode; title: string; hint?: string }) {
   return (
-    <div className="flex items-center gap-2 mb-3">
-      <span className="text-slate-600">{icon}</span>
+    <div className="flex items-baseline gap-2 mb-3 flex-wrap">
+      <span className="text-slate-600 self-center">{icon}</span>
       <h2 className="text-base font-black tracking-tight">{title}</h2>
       {hint && <span className="text-[11px] text-slate-400 font-medium">· {hint}</span>}
     </div>
   );
 }
 
-function KpiCard({ label, value, sub, icon }: { label: string; value: string; sub?: string; icon: ReactNode }) {
+function Kpi({ label, value, sub, delta }: { label: string; value: string; sub?: string; delta?: ReactNode }) {
   return (
     <Card className="p-4">
-      <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-bold uppercase tracking-wide">{icon}{label}</div>
-      <p className="text-2xl font-black mt-1.5 tabular-nums">{value}</p>
+      <p className="text-slate-400 text-[11px] font-bold uppercase tracking-wide">{label}</p>
+      <div className="flex items-center gap-2 mt-1">
+        <p className="text-2xl font-black tabular-nums">{value}</p>
+        {delta}
+      </div>
       {sub && <p className="text-[11px] text-slate-400 mt-0.5">{sub}</p>}
     </Card>
   );
 }
 
-function DeltaPill({ value, invert }: { value: number; invert?: boolean }) {
+function DeltaPill({ value }: { value: number }) {
   if (!value) return <span className="text-[11px] text-slate-300">—</span>;
-  const good = invert ? value < 0 : value > 0;
   const Icon = value > 0 ? TrendingUp : TrendingDown;
   return (
-    <span className={cn('inline-flex items-center gap-0.5 text-[11px] font-bold', good ? 'text-veta' : 'text-danger')}>
+    <span className={cn('inline-flex items-center gap-0.5 text-[11px] font-bold', value > 0 ? 'text-veta' : 'text-danger')}>
       <Icon size={11} />{formatPercent(Math.abs(value))}
     </span>
-  );
-}
-
-function PlatformCard(props: { name: string; color: string; spend: number; conversions: number; cpl: number; ctr: number; impressions: number; deltas: { spend: number; conversions: number } }) {
-  const { name, color, spend, conversions, cpl, ctr, impressions, deltas } = props;
-  return (
-    <Card className="p-5">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
-        <h3 className="font-black">{name}</h3>
-      </div>
-      <div className="grid grid-cols-2 gap-y-4 gap-x-3">
-        <Stat label="Inversión" value={formatCurrency(spend)} delta={<DeltaPill value={deltas.spend} />} />
-        <Stat label="Conversiones" value={formatNumber(conversions)} delta={<DeltaPill value={deltas.conversions} />} />
-        <Stat label="Costo / conv." value={cpl > 0 ? formatCurrency(cpl) : '—'} />
-        <Stat label="CTR" value={ctr > 0 ? formatPercent(ctr) : '—'} sub={`${formatNumber(impressions)} impresiones`} />
-      </div>
-    </Card>
-  );
-}
-
-function Stat({ label, value, sub, delta }: { label: string; value: string; sub?: string; delta?: ReactNode }) {
-  return (
-    <div>
-      <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wide">{label}</p>
-      <div className="flex items-center gap-2">
-        <p className="text-xl font-black tabular-nums">{value}</p>
-        {delta}
-      </div>
-      {sub && <p className="text-[11px] text-slate-400">{sub}</p>}
-    </div>
   );
 }
 
 function AdCard({ ad, tone }: { ad: Ad; tone: 'good' | 'bad' }) {
   return (
     <Card className="p-0 overflow-hidden flex flex-col">
-      <div className="aspect-square bg-slate-100 overflow-hidden grid place-items-center">
+      <div className="aspect-square bg-slate-100 overflow-hidden grid place-items-center relative">
         {ad.thumbnailUrl
           ? <img src={ad.thumbnailUrl} alt={ad.adName} className="w-full h-full object-cover" loading="lazy" />
           : <span className="text-slate-300 text-xs">sin imagen</span>}
+        {ad.vertical && <span className="absolute top-1 left-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/55 text-white">{ad.vertical}</span>}
       </div>
       <div className="p-2.5 flex flex-col gap-1">
         <p className="text-[12px] font-bold leading-tight line-clamp-2" title={ad.adName}>{ad.adName}</p>
         <div className="flex items-center justify-between text-[11px] mt-0.5">
           <span className="text-slate-400">{formatCurrency(ad.spend)}</span>
           {tone === 'good'
-            ? <span className="font-bold text-veta">{ad.conversions > 0 ? `${ad.conversions} conv.` : `CTR ${formatPercent(ad.ctr)}`}</span>
-            : <span className="font-bold text-danger">0 conv.</span>}
+            ? <span className="font-bold text-veta">{ad.leads > 0 ? `${ad.leads} lead${ad.leads > 1 ? 's' : ''}` : `CTR ${formatPercent(ad.ctr)}`}</span>
+            : <span className="font-bold text-danger">0 leads</span>}
         </div>
-        {tone === 'good' && ad.conversions > 0 && (
-          <p className="text-[10px] text-slate-400">CPL {formatCurrency(ad.cpl)} · CTR {formatPercent(ad.ctr)}</p>
-        )}
-        {tone === 'bad' && (
-          <p className="text-[10px] text-slate-400">CTR {formatPercent(ad.ctr)}</p>
-        )}
+        {tone === 'good' && ad.leads > 0
+          ? <p className="text-[10px] text-slate-400">CPL {formatCurrency(ad.cpl)} · CTR {formatPercent(ad.ctr)}</p>
+          : <p className="text-[10px] text-slate-400">CTR {formatPercent(ad.ctr)}</p>}
       </div>
     </Card>
   );
@@ -284,7 +355,7 @@ function DemoCard({ title, items, isGender }: { title: string; items: Demo[]; is
             <div key={i.value}>
               <div className="flex items-center justify-between text-[12px] mb-0.5">
                 <span className="font-semibold text-slate-700 truncate">{label}</span>
-                <span className="text-slate-400 tabular-nums">{formatCurrency(i.spend)}{i.conversions > 0 ? ` · ${i.conversions} conv.` : ''}</span>
+                <span className="text-slate-400 tabular-nums">{formatCurrency(i.spend)}{i.leads > 0 ? ` · ${i.leads} lead${i.leads > 1 ? 's' : ''}` : ''}</span>
               </div>
               <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
                 <div className="h-full rounded-full bg-veta/70" style={{ width: `${(i.spend / max) * 100}%` }} />
