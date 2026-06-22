@@ -27,10 +27,10 @@ type CampaignType = { name: string; spend: number; leads: number; cpl: number };
 type Demo = { value: string; spend: number; leads: number; cpl: number };
 type GoogleData = Funnel & { hasData: boolean; campaigns: { name: string; vertical: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
 type Data = {
-  config: { name: string; currency: string; days: number; generatedAt: string };
+  config: { name: string; currency: string; period: { start: string; end: string }; generatedAt: string; dataUpdatedAt: string | null; metaUpdatedAt: string | null; googleUpdatedAt: string | null };
   overall: Funnel;
-  deltas: { spend: number; leads: number };
   verticals: Vertical[];
+  webinar: (Funnel & { name: string; ads: Ad[] }) | null;
   campaignTypes: CampaignType[];
   ads: { best: Ad[]; worst: Ad[] };
   google: GoogleData;
@@ -50,7 +50,8 @@ export default function SmartwayPublic() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`${BASE}/public-smartway?start=${range.start}&end=${range.end}`)
+    // _t = cache-buster para que nunca devuelva una respuesta cacheada por el browser/CDN
+    fetch(`${BASE}/public-smartway?start=${range.start}&end=${range.end}&_t=${Date.now()}`, { cache: 'no-store' })
       .then(async r => {
         const json = await r.json();
         if (!r.ok || json.error) { setError(json.error ?? `HTTP ${r.status}`); return; }
@@ -63,8 +64,10 @@ export default function SmartwayPublic() {
   if (loading && !data) return <Status icon={<Loader2 className="animate-spin" />} title="Cargando datos de Smartway…" />;
   if (error || !data) return <Status icon={<AlertTriangle />} title="No pudimos cargar el reporte" subtitle={error ?? ''} isError />;
 
-  const { overall, deltas, verticals, campaignTypes, ads, google, demographics, config } = data;
-  const updated = new Date(config.generatedAt);
+  const { overall, verticals, webinar, campaignTypes, ads, google, demographics, config } = data;
+  // Hora REAL del último sync de datos (no la del request)
+  const dataUpd = config.dataUpdatedAt ? new Date(config.dataUpdatedAt) : null;
+  const fmtTime = (d: Date) => d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-slate-900">
@@ -79,36 +82,61 @@ export default function SmartwayPublic() {
           </div>
           <div className="flex items-center gap-3">
             <DateRangePicker value={range} onChange={setRange} />
-            <p className="text-[11px] text-slate-400 text-right hidden sm:block">Actualizado<br />{updated.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} hs</p>
+            <p className="text-[11px] text-slate-400 text-right hidden sm:block">
+              Datos al<br />{dataUpd ? `${fmtTime(dataUpd)} hs` : '—'}
+            </p>
           </div>
         </div>
         {loading && <div className="h-0.5 bg-veta/60 animate-pulse" />}
       </header>
 
       <main className="mx-auto max-w-6xl px-5 py-6 space-y-9">
-        {/* ── KPIs hero ── */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Kpi label="Inversión" value={formatCurrency(overall.spend)} delta={<DeltaPill value={deltas.spend} />} />
-          <Kpi label="Leads" value={formatNumber(overall.leads)} delta={<DeltaPill value={deltas.leads} />} />
-          <Kpi label="Costo por lead" value={overall.cpl > 0 ? formatCurrency(overall.cpl) : '—'} sub="CPL promedio" />
-          <Kpi label="Costo por visita" value={overall.costPerVisit > 0 ? formatCurrency(overall.costPerVisit) : '—'} sub="a la landing" />
+        {/* ── KPIs hero (lead-gen comercial, SIN el webinar Orbatix) ── */}
+        <section>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Kpi label="Inversión" value={formatCurrency(overall.spend)} />
+            <Kpi label="Leads comerciales" value={formatNumber(overall.leads)} sub="sin contar el webinar" />
+            <Kpi label="Costo por lead" value={overall.cpl > 0 ? formatCurrency(overall.cpl) : '—'} sub="CPL comercial" />
+            <Kpi label="Costo por visita" value={overall.costPerVisit > 0 ? formatCurrency(overall.costPerVisit) : '—'} sub="a la landing" />
+          </div>
+          <p className="text-[11px] text-slate-400 mt-2">
+            Los leads del webinar <span className="font-semibold text-violet-600">Orbatix</span> se miden aparte (más abajo) — son registros masivos y distorsionan el CPL comercial.
+          </p>
         </section>
 
         {/* ── Funnel general ── */}
         <section>
-          <SectionTitle icon={<Target size={15} />} title="Embudo general" hint="Meta · de la impresión al lead" />
+          <SectionTitle icon={<Target size={15} />} title="Embudo comercial" hint="Meta · de la impresión al lead · sin webinar" />
           <Card className="p-5">
             <FunnelView f={overall} />
           </Card>
         </section>
 
-        {/* ── Verticales ── */}
+        {/* ── Verticales (lead-gen comercial) ── */}
         <section>
-          <SectionTitle icon={<Flag size={15} />} title="Por vertical" hint="Kit 4.0 · Orbatix · Smartway (el vertical viene del nombre del anuncio)" />
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+          <SectionTitle icon={<Flag size={15} />} title="Por vertical" hint="Lead-gen comercial · el vertical viene del nombre del anuncio" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
             {verticals.map(v => <Fragment key={v.name}><VerticalCard v={v} /></Fragment>)}
           </div>
         </section>
+
+        {/* ── Webinar Orbatix (bucket aparte) ── */}
+        {webinar && (
+          <section>
+            <SectionTitle icon={<Flag size={15} className="text-violet-600" />} title="Webinar Orbatix" hint="Campaña de evento · medida aparte del lead-gen comercial" />
+            <Card className="p-5 border-violet-200 bg-violet-50/30">
+              <div className="flex flex-wrap items-end gap-x-8 gap-y-3 mb-4">
+                <Stat label="Inversión" value={formatCurrency(webinar.spend)} />
+                <Stat label="Registros" value={formatNumber(webinar.leads)} />
+                <Stat label="Costo por registro" value={webinar.cpl > 0 ? formatCurrency(webinar.cpl) : '—'} />
+                <Stat label="CTR" value={webinar.impressions > 0 ? formatPercent(webinar.ctr) : '—'} />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                {webinar.ads.slice(0, 6).map(a => <Fragment key={a.adId}><AdCard ad={a} tone="good" /></Fragment>)}
+              </div>
+            </Card>
+          </section>
+        )}
 
         {/* ── Por tipo de campaña ── */}
         <section>
@@ -155,6 +183,11 @@ export default function SmartwayPublic() {
           <SectionTitle icon={<MousePointerClick size={15} />} title="Google Ads" hint="Búsqueda y display" />
           {google.hasData ? (
             <Card className="p-5 space-y-4">
+              {google.leads === 0 && (
+                <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  ⚠ Google no tiene conversiones registradas en este período — el tracking de conversiones está a revisar con el equipo. Se ven inversión y clicks, pero no leads.
+                </p>
+              )}
               <FunnelView f={google} hideVisits />
               <div className="border-t border-slate-100 pt-3">
                 {google.campaigns.slice(0, 8).map(c => (
@@ -308,13 +341,12 @@ function Kpi({ label, value, sub, delta }: { label: string; value: string; sub?:
   );
 }
 
-function DeltaPill({ value }: { value: number }) {
-  if (!value) return <span className="text-[11px] text-slate-300">—</span>;
-  const Icon = value > 0 ? TrendingUp : TrendingDown;
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <span className={cn('inline-flex items-center gap-0.5 text-[11px] font-bold', value > 0 ? 'text-veta' : 'text-danger')}>
-      <Icon size={11} />{formatPercent(Math.abs(value))}
-    </span>
+    <div>
+      <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wide">{label}</p>
+      <p className="text-xl font-black tabular-nums mt-0.5">{value}</p>
+    </div>
   );
 }
 

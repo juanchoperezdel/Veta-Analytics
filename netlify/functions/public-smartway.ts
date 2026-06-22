@@ -5,31 +5,28 @@ import { sql, corsHeaders, errorResponse } from './_db';
 // Slug fijo server-side: nunca devuelve data de otro cliente. Revocar = cambiar el path
 // de la página en App.tsx y redeployar.
 //
-// Smartway es lead-gen: la conversión primaria son LEADS (no ventas). El dashboard arma
-// el FUNNEL Impresiones → Clicks → Visitas LP → Leads, con costo por etapa, segmentado por
-// VERTICAL (el vertical va en el ad_name: Kit 4.0 / Orbatix / Smartway) y por tipo de campaña.
+// Smartway es lead-gen: la conversión primaria son LEADS. El dashboard arma el FUNNEL
+// Impresiones → Clicks → Visitas LP → Leads, con costo por etapa, segmentado por VERTICAL
+// (el vertical va en el ad_name: Kit 4.0 / Orbatix / Smartway) y por tipo de campaña.
+//
+// IMPORTANTE: Orbatix es una campaña de WEBINAR (registros masivos, leads "fáciles"). Sus
+// leads NO se mezclan con los leads comerciales (romperían el CPL). Van en un bucket aparte.
 
 const SLUG = 'smartway';
+const WEBINAR_VERTICAL = 'Orbatix';
 
-// Fechas en JS (string ISO) — evita la aritmética de fechas con parámetros en Neon,
-// que rompe ("operator does not exist: date >= integer"). Los strings de fecha sí
-// se comparan bien contra la columna date.
+// Fechas en JS (string ISO) — evita la aritmética de fechas con parámetros en Neon.
 function iso(d: Date) { return d.toISOString().split('T')[0]; }
 function todayISO() { return iso(new Date()); }
 function daysAgoISO(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); }
-function shiftMonthISO(dateStr: string, months: number) {
-  const d = new Date(dateStr + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + months); return iso(d);
-}
 
-// El vertical se infiere del nombre del anuncio (ej: "Ad1_Kit4", "Ad2_Orbatix").
-function classifyVertical(adName: string): string {
-  const n = (adName || '').toLowerCase();
+// El vertical se infiere del nombre del anuncio / campaña (ej: "Ad1_Kit4", "Search Kit 4.0").
+function classifyVertical(name: string): string {
+  const n = (name || '').toLowerCase();
   if (/kit\s*4|kit4/.test(n)) return 'Kit 4.0';
   if (/orbatix/.test(n)) return 'Orbatix';
   return 'Smartway';
 }
-
-function delta(c: number, p: number) { return (!p || p === 0) ? 0 : (c - p) / p; }
 
 type Agg = { spend: number; impressions: number; clicks: number; lpv: number; leads: number };
 function emptyAgg(): Agg { return { spend: 0, impressions: 0, clicks: 0, lpv: 0, leads: 0 }; }
@@ -39,19 +36,13 @@ function addAgg(a: Agg, r: { spend: number; impressions: number; clicks: number;
 
 // Construye las 4 etapas del funnel con tasa de paso y costo por etapa.
 function buildFunnel(a: Agg) {
-  const cpm = a.impressions > 0 ? (a.spend / a.impressions) * 1000 : 0;
   return {
-    spend: a.spend,
-    impressions: a.impressions,
-    clicks: a.clicks,
-    visits: a.lpv,
-    leads: a.leads,
+    spend: a.spend, impressions: a.impressions, clicks: a.clicks, visits: a.lpv, leads: a.leads,
     ctr: a.impressions > 0 ? a.clicks / a.impressions : 0,
-    cpm,
+    cpm: a.impressions > 0 ? (a.spend / a.impressions) * 1000 : 0,
     cpc: a.clicks > 0 ? a.spend / a.clicks : 0,
     costPerVisit: a.lpv > 0 ? a.spend / a.lpv : 0,
     cpl: a.leads > 0 ? a.spend / a.leads : 0,
-    // tasas de paso entre etapas
     clickRate: a.impressions > 0 ? a.clicks / a.impressions : 0,
     visitRate: a.clicks > 0 ? Math.min(1, a.lpv / a.clicks) : 0,
     leadRate: a.lpv > 0 ? a.leads / a.lpv : (a.clicks > 0 ? a.leads / a.clicks : 0),
@@ -59,20 +50,18 @@ function buildFunnel(a: Agg) {
 }
 
 export default async (req: Request, _context: Context) => {
-  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders() });
+  const headers = { ...corsHeaders(), 'Cache-Control': 'no-store, max-age=0' };
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
 
   const [client] = await sql`SELECT id, name FROM clients WHERE slug = ${SLUG}`;
   if (!client) return errorResponse('Client not found', 404);
   const cid = client.id;
 
-  // Rango de fechas (default últimos 30 días). Delta vs el mismo rango un mes atrás.
   const url = new URL(req.url);
   const end = url.searchParams.get('end') || todayISO();
   const start = url.searchParams.get('start') || daysAgoISO(29);
-  const prevStart = shiftMonthISO(start, -1);
-  const prevEnd = shiftMonthISO(end, -1);
 
-  // ─── Datos ad-level (30d) — fuente del funnel + verticales + por anuncio ─────
+  // ─── Ad-level Meta (30d sincronizados) — fuente del funnel + verticales ──────
   const adRows = await sql`
     SELECT ad_id, MAX(ad_name) ad_name, MAX(campaign_name) campaign_name,
            MAX(thumbnail_url) thumbnail_url, MAX(effective_status) status,
@@ -83,7 +72,7 @@ export default async (req: Request, _context: Context) => {
     WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
     GROUP BY ad_id`;
 
-  const ads = adRows.map((a: any) => {
+  const allAds = adRows.map((a: any) => {
     const spend = Number(a.spend), impressions = Number(a.impressions), clicks = Number(a.clicks);
     const lpv = Number(a.lpv), leads = Number(a.leads);
     return {
@@ -95,62 +84,61 @@ export default async (req: Request, _context: Context) => {
     };
   });
 
-  // Agregados: overall + por vertical
+  // Separar leads comerciales (Smartway + Kit 4.0) del webinar (Orbatix)
+  const leadgenAds = allAds.filter(a => a.vertical !== WEBINAR_VERTICAL);
+  const webinarAds = allAds.filter(a => a.vertical === WEBINAR_VERTICAL);
+
+  // Funnel general = SOLO lead-gen comercial (sin webinar)
   const overallAgg = emptyAgg();
   const vertAggs: Record<string, Agg> = {};
-  for (const a of ads) {
+  for (const a of leadgenAds) {
     addAgg(overallAgg, a);
     (vertAggs[a.vertical] ??= emptyAgg());
     addAgg(vertAggs[a.vertical], a);
   }
-
   const overall = buildFunnel(overallAgg);
 
-  const VERT_ORDER = ['Orbatix', 'Smartway', 'Kit 4.0'];
+  const VERT_ORDER = ['Smartway', 'Kit 4.0'];
   const verticals = Object.keys(vertAggs)
     .sort((x, y) => (VERT_ORDER.indexOf(x) + 99) - (VERT_ORDER.indexOf(y) + 99) || vertAggs[y].spend - vertAggs[x].spend)
     .map(name => ({
-      name,
-      ...buildFunnel(vertAggs[name]),
-      ads: ads.filter(a => a.vertical === name).sort((p, q) => q.spend - p.spend)
+      name, ...buildFunnel(vertAggs[name]),
+      ads: leadgenAds.filter(a => a.vertical === name).sort((p, q) => q.spend - p.spend)
         .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, spend: a.spend,
-                     impressions: a.impressions, clicks: a.clicks, lpv: a.lpv, leads: a.leads,
-                     ctr: a.ctr, cpl: a.cpl })),
+                     impressions: a.impressions, clicks: a.clicks, lpv: a.lpv, leads: a.leads, ctr: a.ctr, cpl: a.cpl })),
     }));
 
-  // ─── Por tipo de campaña (estructura: Leads / Advantage / Remarketing / ...) ──
-  const campRows = await sql`
-    SELECT segment, SUM(spend)::numeric spend, SUM(purchases)::bigint leads
-    FROM meta_ads_campaigns
-    WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
-    GROUP BY segment ORDER BY SUM(spend) DESC`;
-  const campaignTypes = campRows.map((c: any) => {
-    const spend = Number(c.spend), leads = Number(c.leads);
-    return { name: c.segment ?? '(sin nombre)', spend, leads, cpl: leads > 0 ? spend / leads : 0 };
-  });
+  // Webinar (Orbatix) — bucket aparte
+  const webinarAgg = emptyAgg();
+  for (const a of webinarAds) addAgg(webinarAgg, a);
+  const webinar = webinarAds.length ? {
+    name: 'Orbatix (webinar)',
+    ...buildFunnel(webinarAgg),
+    ads: webinarAds.sort((p, q) => q.spend - p.spend)
+      .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl })),
+  } : null;
 
-  // Delta de leads/inversión vs mismo rango mes anterior (de la tabla de campañas)
-  const [curr] = await sql`
-    SELECT COALESCE(SUM(spend),0)::numeric spend, COALESCE(SUM(purchases),0)::bigint leads
-    FROM meta_ads_campaigns WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}`;
-  const [prev] = await sql`
-    SELECT COALESCE(SUM(spend),0)::numeric spend, COALESCE(SUM(purchases),0)::bigint leads
-    FROM meta_ads_campaigns WHERE client_id = ${cid}
-      AND snapshot_date BETWEEN ${prevStart} AND ${prevEnd}`;
-  const deltas = { spend: delta(Number(curr.spend), Number(prev.spend)), leads: delta(Number(curr.leads), Number(prev.leads)) };
+  // Por tipo de campaña (estructura) — recomputado de ad-level lead-gen (excluye Orbatix)
+  const byCamp: Record<string, { spend: number; leads: number }> = {};
+  for (const a of leadgenAds) {
+    const k = a.campaignName || '(sin nombre)';
+    (byCamp[k] ??= { spend: 0, leads: 0 });
+    byCamp[k].spend += a.spend; byCamp[k].leads += a.leads;
+  }
+  const campaignTypes = Object.entries(byCamp)
+    .map(([name, v]) => ({ name, spend: v.spend, leads: v.leads, cpl: v.leads > 0 ? v.spend / v.leads : 0 }))
+    .sort((a, b) => b.spend - a.spend);
 
-  // ─── Mejores / peores anuncios (global, 30d) ─────────────────────────────────
+  // Mejores / peores anuncios (lead-gen, no webinar)
   const SPEND_FLOOR = 3000;
-  const withLeads = ads.filter(a => a.leads > 0).sort((a, b) => a.cpl - b.cpl);
-  const noLeads = ads.filter(a => a.leads === 0 && a.spend >= SPEND_FLOOR).sort((a, b) => b.spend - a.spend);
-  const best = (withLeads.length ? withLeads : [...ads].sort((a, b) => b.ctr - a.ctr)).slice(0, 6)
-    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl,
-                 spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
+  const withLeads = leadgenAds.filter(a => a.leads > 0).sort((a, b) => a.cpl - b.cpl);
+  const noLeads = leadgenAds.filter(a => a.leads === 0 && a.spend >= SPEND_FLOOR).sort((a, b) => b.spend - a.spend);
+  const best = (withLeads.length ? withLeads : [...leadgenAds].sort((a, b) => b.ctr - a.ctr)).slice(0, 6)
+    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
   const worst = noLeads.slice(0, 6)
-    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl,
-                 spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
+    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
 
-  // ─── Google (campaign-level; vacío hasta el primer sync en la nube) ──────────
+  // ─── Google (campaign-level) ─────────────────────────────────────────────────
   const gRows = await sql`
     SELECT name, SUM(spend)::numeric spend, SUM(impressions)::bigint impressions,
            SUM(clicks)::bigint clicks, SUM(carts)::bigint leads
@@ -164,15 +152,13 @@ export default async (req: Request, _context: Context) => {
     ...buildFunnel(gAgg),
     campaigns: gRows.map((r: any) => {
       const spend = Number(r.spend), leads = Number(r.leads);
-      return { name: r.name, vertical: classifyVertical(r.name), spend, clicks: Number(r.clicks),
-               impressions: Number(r.impressions), leads, cpl: leads > 0 ? spend / leads : 0 };
+      return { name: r.name, vertical: classifyVertical(r.name), spend, clicks: Number(r.clicks), impressions: Number(r.impressions), leads, cpl: leads > 0 ? spend / leads : 0 };
     }),
   };
 
   // ─── Demografía (Meta, top por gasto) ────────────────────────────────────────
   const demoRows = await sql`
-    SELECT dimension_type, dimension_value,
-           SUM(spend)::numeric spend, SUM(purchases)::bigint leads
+    SELECT dimension_type, dimension_value, SUM(spend)::numeric spend, SUM(purchases)::bigint leads
     FROM meta_ads_breakdowns
     WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
     GROUP BY dimension_type, dimension_value HAVING SUM(spend) > 0`;
@@ -188,15 +174,28 @@ export default async (req: Request, _context: Context) => {
     demographics[k] = demographics[k].slice(0, 8);
   }
 
+  // ─── Última actualización REAL de los datos (no la hora del request) ─────────
+  const [upd] = await sql`
+    SELECT MAX(s) AS last FROM (
+      SELECT MAX(synced_at) s FROM meta_ads_campaigns WHERE client_id = ${cid}
+      UNION ALL SELECT MAX(synced_at) FROM meta_ads_creatives WHERE client_id = ${cid}
+      UNION ALL SELECT MAX(synced_at) FROM google_ads_campaigns WHERE client_id = ${cid}
+    ) t`;
+  const [metaUpd] = await sql`SELECT MAX(synced_at) s FROM meta_ads_campaigns WHERE client_id = ${cid}`;
+  const [gUpd] = await sql`SELECT MAX(synced_at) s FROM google_ads_campaigns WHERE client_id = ${cid}`;
+
   const body = {
-    config: { name: client.name, currency: 'ARS', period: { start, end }, generatedAt: new Date().toISOString() },
-    overall, deltas,
-    verticals,
-    campaignTypes,
+    config: {
+      name: client.name, currency: 'ARS', period: { start, end },
+      generatedAt: new Date().toISOString(),
+      dataUpdatedAt: upd?.last ?? null,
+      metaUpdatedAt: metaUpd?.s ?? null,
+      googleUpdatedAt: gUpd?.s ?? null,
+    },
+    overall, verticals, webinar, campaignTypes,
     ads: { best, worst },
-    google,
-    demographics,
+    google, demographics,
   };
 
-  return new Response(JSON.stringify(body), { headers: corsHeaders() });
+  return new Response(JSON.stringify(body), { headers });
 };

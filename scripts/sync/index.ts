@@ -173,7 +173,7 @@ async function syncGoogleAds(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v21/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {
@@ -309,7 +309,7 @@ async function syncGoogleAdsSearchTerms(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v21/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {
@@ -599,7 +599,7 @@ async function syncGoogleAdsHourly(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v21/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {
