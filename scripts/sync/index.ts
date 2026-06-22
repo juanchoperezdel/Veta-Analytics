@@ -386,16 +386,22 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
     'actions', 'action_values', 'ctr',
   ].join(',');
 
-  const url = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
+  let url: string | null = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
     `level=ad&time_increment=1` +
     `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
     `&filtering=${encodeURIComponent(JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]))}` +
     `&fields=${fields}&access_token=${accessToken}&limit=500`;
 
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Meta creatives API error: ${res.status} ${await res.text()}`);
-  const body = await res.json();
-  const data: any[] = body.data ?? [];
+  // PAGINAR: con 30 días × decenas de ads se superan las 500 filas de una página.
+  // Sin paginar se truncaban los días recientes (ej: registros del webinar de hoy).
+  const data: any[] = [];
+  while (url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Meta creatives API error: ${res.status} ${await res.text()}`);
+    const body: any = await res.json();
+    data.push(...(body.data ?? []));
+    url = body.paging?.next ?? null;
+  }
 
   // Pedimos creative info (thumbnail_url + effective_status) — solo para los top ads por spend
   // y con sleep de 1.5s entre batches para no pegar rate limit.
