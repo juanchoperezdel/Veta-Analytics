@@ -1,7 +1,7 @@
 import { useEffect, useState, Fragment, type ReactNode } from 'react';
 import {
   TrendingUp, TrendingDown, Target, Trophy, AlertTriangle, Users, Loader2,
-  Eye, MousePointerClick, MapPin, Flag,
+  Eye, MousePointerClick, MapPin, Flag, ExternalLink,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
@@ -21,7 +21,7 @@ type Funnel = {
   ctr: number; cpm: number; cpc: number; costPerVisit: number; cpl: number;
   clickRate: number; visitRate: number; leadRate: number;
 };
-type Ad = { adId: string; adName: string; vertical?: string; thumbnailUrl: string | null; spend: number; impressions?: number; clicks?: number; lpv?: number; leads: number; ctr: number; cpl: number };
+type Ad = { adId: string; adName: string; vertical?: string; thumbnailUrl: string | null; previewLink?: string | null; spend: number; impressions?: number; clicks?: number; lpv?: number; leads: number; ctr: number; cpl: number };
 type Vertical = Funnel & { name: string; ads: Ad[] };
 type CampaignType = { name: string; spend: number; leads: number; cpl: number };
 type Demo = { value: string; spend: number; leads: number; cpl: number };
@@ -302,15 +302,20 @@ function VerticalCard({ v }: { v: Vertical }) {
         <span className="font-black" style={{ color }}>{v.leads > 0 ? formatCurrency(v.cpl) : 'sin leads'}</span>
       </div>
       <div className="space-y-1.5">
-        {v.ads.slice(0, 4).map(a => (
-          <div key={a.adId} className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-md bg-slate-100 overflow-hidden shrink-0 grid place-items-center">
-              {a.thumbnailUrl ? <img src={a.thumbnailUrl} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-[8px] text-slate-300">—</span>}
-            </div>
-            <span className="text-[11px] font-medium truncate flex-1" title={a.adName}>{a.adName}</span>
-            <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{a.leads > 0 ? `${a.leads} lead${a.leads > 1 ? 's' : ''}` : formatPercent(a.ctr)}</span>
-          </div>
-        ))}
+        {v.ads.slice(0, 4).map(a => {
+          const row = (
+            <>
+              <div className="w-8 h-8 rounded-md bg-slate-100 overflow-hidden shrink-0 grid place-items-center">
+                {a.thumbnailUrl ? <img src={a.thumbnailUrl} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-[8px] text-slate-300">—</span>}
+              </div>
+              <span className={cn('text-[11px] font-medium truncate flex-1', a.previewLink && 'group-hover:text-veta group-hover:underline')} title={a.adName}>{a.adName}</span>
+              <span className="text-[11px] text-slate-400 tabular-nums shrink-0">{a.leads > 0 ? `${a.leads} lead${a.leads > 1 ? 's' : ''}` : formatPercent(a.ctr)}</span>
+            </>
+          );
+          return a.previewLink
+            ? <a key={a.adId} href={a.previewLink} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-2" title="Ver el anuncio">{row}</a>
+            : <div key={a.adId} className="flex items-center gap-2">{row}</div>;
+        })}
         {v.ads.length === 0 && <p className="text-[11px] text-slate-400 text-center py-2">Sin anuncios</p>}
       </div>
     </Card>
@@ -351,14 +356,24 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function AdCard({ ad, tone }: { ad: Ad; tone: 'good' | 'bad' }) {
+  const media = (
+    <div className="aspect-square bg-slate-100 overflow-hidden grid place-items-center relative group">
+      {ad.thumbnailUrl
+        ? <img src={ad.thumbnailUrl} alt={ad.adName} className="w-full h-full object-cover" loading="lazy" />
+        : <span className="text-slate-300 text-xs">sin imagen</span>}
+      {ad.vertical && <span className="absolute top-1 left-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/55 text-white">{ad.vertical}</span>}
+      {ad.previewLink && (
+        <span className="absolute inset-0 bg-black/0 group-hover:bg-black/45 transition-colors grid place-items-center opacity-0 group-hover:opacity-100">
+          <span className="inline-flex items-center gap-1 text-white text-[11px] font-bold bg-black/40 px-2 py-1 rounded-lg"><ExternalLink size={12} /> Ver anuncio</span>
+        </span>
+      )}
+    </div>
+  );
   return (
     <Card className="p-0 overflow-hidden flex flex-col">
-      <div className="aspect-square bg-slate-100 overflow-hidden grid place-items-center relative">
-        {ad.thumbnailUrl
-          ? <img src={ad.thumbnailUrl} alt={ad.adName} className="w-full h-full object-cover" loading="lazy" />
-          : <span className="text-slate-300 text-xs">sin imagen</span>}
-        {ad.vertical && <span className="absolute top-1 left-1 text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/55 text-white">{ad.vertical}</span>}
-      </div>
+      {ad.previewLink
+        ? <a href={ad.previewLink} target="_blank" rel="noopener noreferrer" title="Ver el anuncio">{media}</a>
+        : media}
       <div className="p-2.5 flex flex-col gap-1">
         <p className="text-[12px] font-bold leading-tight line-clamp-2" title={ad.adName}>{ad.adName}</p>
         <div className="flex items-center justify-between text-[11px] mt-0.5">

@@ -64,7 +64,7 @@ export default async (req: Request, _context: Context) => {
   // ─── Ad-level Meta (30d sincronizados) — fuente del funnel + verticales ──────
   const adRows = await sql`
     SELECT ad_id, MAX(ad_name) ad_name, MAX(campaign_name) campaign_name,
-           MAX(thumbnail_url) thumbnail_url, MAX(effective_status) status,
+           MAX(thumbnail_url) thumbnail_url, MAX(effective_status) status, MAX(preview_link) preview_link,
            SUM(spend)::numeric spend, SUM(impressions)::bigint impressions,
            SUM(clicks)::bigint clicks, COALESCE(SUM(landing_page_view),0)::bigint lpv,
            SUM(purchases)::bigint leads
@@ -78,6 +78,7 @@ export default async (req: Request, _context: Context) => {
     return {
       adId: a.ad_id, adName: a.ad_name ?? '(sin nombre)', campaignName: a.campaign_name ?? '',
       vertical: classifyVertical(a.ad_name), thumbnailUrl: a.thumbnail_url ?? null, status: a.status,
+      previewLink: a.preview_link ?? null,
       spend, impressions, clicks, lpv, leads,
       ctr: impressions > 0 ? clicks / impressions : 0,
       cpl: leads > 0 ? spend / leads : 0,
@@ -104,7 +105,7 @@ export default async (req: Request, _context: Context) => {
     .map(name => ({
       name, ...buildFunnel(vertAggs[name]),
       ads: leadgenAds.filter(a => a.vertical === name).sort((p, q) => q.spend - p.spend)
-        .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, spend: a.spend,
+        .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, previewLink: a.previewLink, spend: a.spend,
                      impressions: a.impressions, clicks: a.clicks, lpv: a.lpv, leads: a.leads, ctr: a.ctr, cpl: a.cpl })),
     }));
 
@@ -115,7 +116,7 @@ export default async (req: Request, _context: Context) => {
     name: 'Orbatix (webinar)',
     ...buildFunnel(webinarAgg),
     ads: webinarAds.sort((p, q) => q.spend - p.spend)
-      .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl })),
+      .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, previewLink: a.previewLink, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl })),
   } : null;
 
   // Por tipo de campaña (estructura) — recomputado de ad-level lead-gen (excluye Orbatix)
@@ -134,9 +135,9 @@ export default async (req: Request, _context: Context) => {
   const withLeads = leadgenAds.filter(a => a.leads > 0).sort((a, b) => a.cpl - b.cpl);
   const noLeads = leadgenAds.filter(a => a.leads === 0 && a.spend >= SPEND_FLOOR).sort((a, b) => b.spend - a.spend);
   const best = (withLeads.length ? withLeads : [...leadgenAds].sort((a, b) => b.ctr - a.ctr)).slice(0, 6)
-    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
+    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl, previewLink: a.previewLink, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
   const worst = noLeads.slice(0, 6)
-    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
+    .map(a => ({ adId: a.adId, adName: a.adName, vertical: a.vertical, thumbnailUrl: a.thumbnailUrl, previewLink: a.previewLink, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl }));
 
   // ─── Google (campaign-level) ─────────────────────────────────────────────────
   const gRows = await sql`

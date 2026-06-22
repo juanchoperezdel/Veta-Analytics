@@ -414,12 +414,12 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
     .slice(0, 60)  // top 60 — más que suficiente para una galería de "top creatives"
     .map(([id]) => id);
 
-  const adInfo = new Map<string, { thumb: string | null; status: string | null }>();
+  const adInfo = new Map<string, { thumb: string | null; status: string | null; link: string | null }>();
   for (let i = 0; i < topAdIds.length; i += 50) {
     const chunk = topAdIds.slice(i, i + 50);
     const batch = chunk.map(id => ({
       method: 'GET',
-      relative_url: `${id}?fields=effective_status,creative{thumbnail_url}`,
+      relative_url: `${id}?fields=effective_status,preview_shareable_link,creative{thumbnail_url,instagram_permalink_url}`,
     }));
     try {
       const bRes = await fetch('https://graph.facebook.com/v21.0/', {
@@ -438,6 +438,8 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
             adInfo.set(chunk[idx], {
               thumb: parsed.creative?.thumbnail_url ?? null,
               status: parsed.effective_status ?? null,
+              // permalink IG público preferido; si no, el preview compartible de Meta
+              link: parsed.creative?.instagram_permalink_url ?? parsed.preview_shareable_link ?? null,
             });
           }
         });
@@ -466,12 +468,12 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
       INSERT INTO meta_ads_creatives
         (client_id, snapshot_date, ad_id, ad_name, campaign_id, campaign_name,
          thumbnail_url, effective_status,
-         spend, impressions, clicks, reach, purchases, revenue, cpa, roas, ctr, landing_page_view)
+         spend, impressions, clicks, reach, purchases, revenue, cpa, roas, ctr, landing_page_view, preview_link)
       VALUES
         (${clientId}, ${date}, ${row.ad_id}, ${row.ad_name}, ${row.campaign_id}, ${row.campaign_name},
          ${info?.thumb ?? null}, ${info?.status ?? null},
          ${spend}, ${impressions}, ${clicks}, ${reach}, ${purchases}, ${revenue},
-         ${cpa}, ${roas}, ${ctr}, ${lpv})
+         ${cpa}, ${roas}, ${ctr}, ${lpv}, ${info?.link ?? null})
       ON CONFLICT (client_id, snapshot_date, ad_id)
       DO UPDATE SET
         ad_name = EXCLUDED.ad_name, campaign_id = EXCLUDED.campaign_id, campaign_name = EXCLUDED.campaign_name,
@@ -479,7 +481,8 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
         spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
         reach = EXCLUDED.reach, purchases = EXCLUDED.purchases, revenue = EXCLUDED.revenue,
         cpa = EXCLUDED.cpa, roas = EXCLUDED.roas, ctr = EXCLUDED.ctr,
-        landing_page_view = EXCLUDED.landing_page_view, synced_at = NOW()
+        landing_page_view = EXCLUDED.landing_page_view,
+        preview_link = COALESCE(EXCLUDED.preview_link, meta_ads_creatives.preview_link), synced_at = NOW()
     `;
   }
 
