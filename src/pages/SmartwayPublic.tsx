@@ -23,7 +23,7 @@ type Funnel = {
 };
 type Ad = { adId: string; adName: string; vertical?: string; thumbnailUrl: string | null; previewLink?: string | null; spend: number; impressions?: number; clicks?: number; lpv?: number; leads: number; ctr: number; cpl: number };
 type Vertical = Funnel & { name: string; ads: Ad[] };
-type CampaignType = { name: string; spend: number; leads: number; cpl: number; managed: boolean };
+type CampaignType = { name: string; spend: number; leads: number; cpl: number };
 type Demo = { value: string; spend: number; leads: number; cpl: number; ctr: number };
 type GoogleData = Funnel & { hasData: boolean; campaigns: { name: string; vertical: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
 type Data = {
@@ -148,23 +148,15 @@ export default function SmartwayPublic() {
               <span>Campaña</span><span className="text-right">Inversión</span><span className="text-right">Leads</span><span className="text-right">CPL</span>
             </div>
             {campaignTypes.map(c => (
-              <div key={c.name} className={cn('grid grid-cols-[2fr_1fr_0.8fr_1fr] gap-2 px-4 py-2.5 items-center border-b border-slate-50 last:border-0 hover:bg-slate-50/60', !c.managed && 'bg-slate-50/40')}>
-                <span className="flex items-center gap-2 min-w-0">
-                  <span className={cn('text-sm font-semibold truncate', !c.managed && 'text-slate-400')} title={c.name}>{c.name}</span>
-                  {!c.managed && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">No gestionada por Veta</span>}
-                </span>
-                <span className={cn('text-right text-sm tabular-nums', !c.managed && 'text-slate-400')}>{formatCurrency(c.spend)}</span>
-                <span className={cn('text-right text-sm tabular-nums font-semibold', !c.managed && 'text-slate-400 font-normal')}>{formatNumber(c.leads)}</span>
-                <span className={cn('text-right text-sm tabular-nums', !c.managed && 'text-slate-400')}>{c.leads > 0 ? formatCurrency(c.cpl) : '—'}</span>
+              <div key={c.name} className="grid grid-cols-[2fr_1fr_0.8fr_1fr] gap-2 px-4 py-2.5 items-center border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
+                <span className="text-sm font-semibold truncate" title={c.name}>{c.name}</span>
+                <span className="text-right text-sm tabular-nums">{formatCurrency(c.spend)}</span>
+                <span className="text-right text-sm tabular-nums font-semibold">{formatNumber(c.leads)}</span>
+                <span className="text-right text-sm tabular-nums">{c.leads > 0 ? formatCurrency(c.cpl) : '—'}</span>
               </div>
             ))}
             {campaignTypes.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-400">Sin campañas en el período.</p>}
           </Card>
-          {campaignTypes.some(c => !c.managed) && (
-            <p className="text-[11px] text-slate-400 mt-2">
-              Las campañas marcadas <span className="font-semibold text-slate-500">"No gestionada por Veta"</span> viven en la misma cuenta pero las maneja el cliente — se excluyen del CPL y el embudo comercial de arriba.
-            </p>
-          )}
         </section>
 
         {/* ── Mejores / peores anuncios ── */}

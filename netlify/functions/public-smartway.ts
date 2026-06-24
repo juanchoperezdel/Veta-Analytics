@@ -131,16 +131,16 @@ export default async (req: Request, _context: Context) => {
       .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, previewLink: a.previewLink, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl })),
   } : null;
 
-  // Por tipo de campaña (estructura) — incluye las NO gestionadas (Novaz) pero marcadas
-  // con managed:false para que el cliente las identifique sin que ensucien los KPIs.
-  const byCamp: Record<string, { spend: number; leads: number; managed: boolean }> = {};
-  for (const a of nonWebinarAds) {
+  // Por tipo de campaña (estructura) — SOLO lo gestionado por Veta. Las campañas de
+  // terceros (Novaz) ya están fuera de leadgenAds, así que no aparecen en el dashboard.
+  const byCamp: Record<string, { spend: number; leads: number }> = {};
+  for (const a of leadgenAds) {
     const k = a.campaignName || '(sin nombre)';
-    (byCamp[k] ??= { spend: 0, leads: 0, managed: isManaged(a.campaignName) });
+    (byCamp[k] ??= { spend: 0, leads: 0 });
     byCamp[k].spend += a.spend; byCamp[k].leads += a.leads;
   }
   const campaignTypes = Object.entries(byCamp)
-    .map(([name, v]) => ({ name, spend: v.spend, leads: v.leads, cpl: v.leads > 0 ? v.spend / v.leads : 0, managed: v.managed }))
+    .map(([name, v]) => ({ name, spend: v.spend, leads: v.leads, cpl: v.leads > 0 ? v.spend / v.leads : 0 }))
     .sort((a, b) => b.spend - a.spend);
 
   // Mejores / peores anuncios (lead-gen, no webinar)
