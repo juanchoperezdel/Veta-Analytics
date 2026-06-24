@@ -15,6 +15,12 @@ import { sql, corsHeaders, errorResponse } from './_db';
 const SLUG = 'smartway';
 const WEBINAR_VERTICAL = 'Orbatix';
 
+// Campañas que viven en la cuenta de Meta de Smartway pero NO las gestiona Veta
+// (las maneja el cliente / un tercero). Se identifican por el nombre y se separan
+// del CPL/funnel comercial para no ensuciar la lectura — pero se muestran marcadas.
+const UNMANAGED_RE = /novaz/i;
+function isManaged(name: string): boolean { return !UNMANAGED_RE.test(name || ''); }
+
 // Fechas en JS (string ISO) — evita la aritmética de fechas con parámetros en Neon.
 function iso(d: Date) { return d.toISOString().split('T')[0]; }
 function todayISO() { return iso(new Date()); }
@@ -28,10 +34,10 @@ function classifyVertical(name: string): string {
   return 'Smartway';
 }
 
-type Agg = { spend: number; impressions: number; clicks: number; lpv: number; leads: number };
-function emptyAgg(): Agg { return { spend: 0, impressions: 0, clicks: 0, lpv: 0, leads: 0 }; }
-function addAgg(a: Agg, r: { spend: number; impressions: number; clicks: number; lpv: number; leads: number }) {
-  a.spend += r.spend; a.impressions += r.impressions; a.clicks += r.clicks; a.lpv += r.lpv; a.leads += r.leads;
+type Agg = { spend: number; impressions: number; clicks: number; lpv: number; leads: number; reach: number };
+function emptyAgg(): Agg { return { spend: 0, impressions: 0, clicks: 0, lpv: 0, leads: 0, reach: 0 }; }
+function addAgg(a: Agg, r: { spend: number; impressions: number; clicks: number; lpv: number; leads: number; reach: number }) {
+  a.spend += r.spend; a.impressions += r.impressions; a.clicks += r.clicks; a.lpv += r.lpv; a.leads += r.leads; a.reach += r.reach;
 }
 
 // Construye las 4 etapas del funnel con tasa de paso y costo por etapa.
@@ -43,6 +49,9 @@ function buildFunnel(a: Agg) {
     cpc: a.clicks > 0 ? a.spend / a.clicks : 0,
     costPerVisit: a.lpv > 0 ? a.spend / a.lpv : 0,
     cpl: a.leads > 0 ? a.spend / a.leads : 0,
+    // Frecuencia aprox: reach se suma entre días/ads y se solapa, así que esto SUBESTIMA
+    // la frecuencia real. Sirve como termómetro de saturación, no como número exacto.
+    frequency: a.reach > 0 ? a.impressions / a.reach : 0,
     clickRate: a.impressions > 0 ? a.clicks / a.impressions : 0,
     visitRate: a.clicks > 0 ? Math.min(1, a.lpv / a.clicks) : 0,
     leadRate: a.lpv > 0 ? a.leads / a.lpv : (a.clicks > 0 ? a.leads / a.clicks : 0),
@@ -67,26 +76,29 @@ export default async (req: Request, _context: Context) => {
            MAX(thumbnail_url) thumbnail_url, MAX(effective_status) status, MAX(preview_link) preview_link,
            SUM(spend)::numeric spend, SUM(impressions)::bigint impressions,
            SUM(clicks)::bigint clicks, COALESCE(SUM(landing_page_view),0)::bigint lpv,
-           SUM(purchases)::bigint leads
+           SUM(purchases)::bigint leads, COALESCE(SUM(reach),0)::bigint reach
     FROM meta_ads_creatives
     WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
     GROUP BY ad_id`;
 
   const allAds = adRows.map((a: any) => {
     const spend = Number(a.spend), impressions = Number(a.impressions), clicks = Number(a.clicks);
-    const lpv = Number(a.lpv), leads = Number(a.leads);
+    const lpv = Number(a.lpv), leads = Number(a.leads), reach = Number(a.reach);
     return {
       adId: a.ad_id, adName: a.ad_name ?? '(sin nombre)', campaignName: a.campaign_name ?? '',
       vertical: classifyVertical(a.ad_name), thumbnailUrl: a.thumbnail_url ?? null, status: a.status,
       previewLink: a.preview_link ?? null,
-      spend, impressions, clicks, lpv, leads,
+      spend, impressions, clicks, lpv, leads, reach,
       ctr: impressions > 0 ? clicks / impressions : 0,
       cpl: leads > 0 ? spend / leads : 0,
     };
   });
 
-  // Separar leads comerciales (Smartway + Kit 4.0) del webinar (Orbatix)
-  const leadgenAds = allAds.filter(a => a.vertical !== WEBINAR_VERTICAL);
+  // Separar leads comerciales (Smartway + Kit 4.0) del webinar (Orbatix) y de las
+  // campañas NO gestionadas por Veta (Novaz). Solo lo gestionado-comercial alimenta
+  // el funnel/CPL/verticales; Novaz se reporta aparte y marcado en la tabla.
+  const nonWebinarAds = allAds.filter(a => a.vertical !== WEBINAR_VERTICAL);
+  const leadgenAds = nonWebinarAds.filter(a => isManaged(a.campaignName));
   const webinarAds = allAds.filter(a => a.vertical === WEBINAR_VERTICAL);
 
   // Funnel general = SOLO lead-gen comercial (sin webinar)
@@ -119,15 +131,16 @@ export default async (req: Request, _context: Context) => {
       .map(a => ({ adId: a.adId, adName: a.adName, thumbnailUrl: a.thumbnailUrl, previewLink: a.previewLink, spend: a.spend, leads: a.leads, ctr: a.ctr, cpl: a.cpl })),
   } : null;
 
-  // Por tipo de campaña (estructura) — recomputado de ad-level lead-gen (excluye Orbatix)
-  const byCamp: Record<string, { spend: number; leads: number }> = {};
-  for (const a of leadgenAds) {
+  // Por tipo de campaña (estructura) — incluye las NO gestionadas (Novaz) pero marcadas
+  // con managed:false para que el cliente las identifique sin que ensucien los KPIs.
+  const byCamp: Record<string, { spend: number; leads: number; managed: boolean }> = {};
+  for (const a of nonWebinarAds) {
     const k = a.campaignName || '(sin nombre)';
-    (byCamp[k] ??= { spend: 0, leads: 0 });
+    (byCamp[k] ??= { spend: 0, leads: 0, managed: isManaged(a.campaignName) });
     byCamp[k].spend += a.spend; byCamp[k].leads += a.leads;
   }
   const campaignTypes = Object.entries(byCamp)
-    .map(([name, v]) => ({ name, spend: v.spend, leads: v.leads, cpl: v.leads > 0 ? v.spend / v.leads : 0 }))
+    .map(([name, v]) => ({ name, spend: v.spend, leads: v.leads, cpl: v.leads > 0 ? v.spend / v.leads : 0, managed: v.managed }))
     .sort((a, b) => b.spend - a.spend);
 
   // Mejores / peores anuncios (lead-gen, no webinar)
@@ -147,7 +160,7 @@ export default async (req: Request, _context: Context) => {
     WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
     GROUP BY name ORDER BY SUM(spend) DESC`;
   const gAgg = emptyAgg();
-  for (const r of gRows) addAgg(gAgg, { spend: Number(r.spend), impressions: Number(r.impressions), clicks: Number(r.clicks), lpv: 0, leads: Number(r.leads) });
+  for (const r of gRows) addAgg(gAgg, { spend: Number(r.spend), impressions: Number(r.impressions), clicks: Number(r.clicks), lpv: 0, leads: Number(r.leads), reach: 0 });
   const google = {
     hasData: gAgg.spend > 0,
     ...buildFunnel(gAgg),
@@ -159,7 +172,8 @@ export default async (req: Request, _context: Context) => {
 
   // ─── Demografía (Meta, top por gasto) ────────────────────────────────────────
   const demoRows = await sql`
-    SELECT dimension_type, dimension_value, SUM(spend)::numeric spend, SUM(purchases)::bigint leads
+    SELECT dimension_type, dimension_value, SUM(spend)::numeric spend, SUM(purchases)::bigint leads,
+           SUM(impressions)::bigint impressions, SUM(clicks)::bigint clicks
     FROM meta_ads_breakdowns
     WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
     GROUP BY dimension_type, dimension_value HAVING SUM(spend) > 0`;
@@ -168,7 +182,9 @@ export default async (req: Request, _context: Context) => {
     const t = r.dimension_type;
     (demographics[t] ??= []);
     const spend = Number(r.spend), leads = Number(r.leads);
-    demographics[t].push({ value: r.dimension_value, spend, leads, cpl: leads > 0 ? spend / leads : 0 });
+    const impressions = Number(r.impressions), clicks = Number(r.clicks);
+    demographics[t].push({ value: r.dimension_value, spend, leads, cpl: leads > 0 ? spend / leads : 0,
+                           ctr: impressions > 0 ? clicks / impressions : 0 });
   }
   for (const k of Object.keys(demographics)) {
     demographics[k].sort((a, b) => b.spend - a.spend);

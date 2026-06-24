@@ -18,13 +18,13 @@ function initialRange(): DateRange {
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 type Funnel = {
   spend: number; impressions: number; clicks: number; visits: number; leads: number;
-  ctr: number; cpm: number; cpc: number; costPerVisit: number; cpl: number;
+  ctr: number; cpm: number; cpc: number; costPerVisit: number; cpl: number; frequency: number;
   clickRate: number; visitRate: number; leadRate: number;
 };
 type Ad = { adId: string; adName: string; vertical?: string; thumbnailUrl: string | null; previewLink?: string | null; spend: number; impressions?: number; clicks?: number; lpv?: number; leads: number; ctr: number; cpl: number };
 type Vertical = Funnel & { name: string; ads: Ad[] };
-type CampaignType = { name: string; spend: number; leads: number; cpl: number };
-type Demo = { value: string; spend: number; leads: number; cpl: number };
+type CampaignType = { name: string; spend: number; leads: number; cpl: number; managed: boolean };
+type Demo = { value: string; spend: number; leads: number; cpl: number; ctr: number };
 type GoogleData = Funnel & { hasData: boolean; campaigns: { name: string; vertical: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
 type Data = {
   config: { name: string; currency: string; period: { start: string; end: string }; generatedAt: string; dataUpdatedAt: string | null; metaUpdatedAt: string | null; googleUpdatedAt: string | null };
@@ -93,11 +93,13 @@ export default function SmartwayPublic() {
       <main className="mx-auto max-w-6xl px-5 py-6 space-y-9">
         {/* ── KPIs hero (lead-gen comercial, SIN el webinar Orbatix) ── */}
         <section>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <Kpi label="Inversión" value={formatCurrency(overall.spend)} />
             <Kpi label="Leads comerciales" value={formatNumber(overall.leads)} sub="sin contar el webinar" />
             <Kpi label="Costo por lead" value={overall.cpl > 0 ? formatCurrency(overall.cpl) : '—'} sub="CPL comercial" />
             <Kpi label="Costo por visita" value={overall.costPerVisit > 0 ? formatCurrency(overall.costPerVisit) : '—'} sub="a la landing" />
+            <Kpi label="CTR" value={overall.impressions > 0 ? formatPercent(overall.ctr) : '—'} sub="clicks ÷ impresiones" />
+            <Kpi label="Frecuencia" value={overall.frequency > 0 ? `${overall.frequency.toFixed(1)}×` : '—'} sub="prom. visto por persona / día" />
           </div>
           <p className="text-[11px] text-slate-400 mt-2">
             Los leads del webinar <span className="font-semibold text-violet-600">Orbatix</span> se miden aparte (más abajo) — son registros masivos y distorsionan el CPL comercial.
@@ -146,15 +148,23 @@ export default function SmartwayPublic() {
               <span>Campaña</span><span className="text-right">Inversión</span><span className="text-right">Leads</span><span className="text-right">CPL</span>
             </div>
             {campaignTypes.map(c => (
-              <div key={c.name} className="grid grid-cols-[2fr_1fr_0.8fr_1fr] gap-2 px-4 py-2.5 items-center border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
-                <span className="text-sm font-semibold truncate" title={c.name}>{c.name}</span>
-                <span className="text-right text-sm tabular-nums">{formatCurrency(c.spend)}</span>
-                <span className="text-right text-sm tabular-nums font-semibold">{formatNumber(c.leads)}</span>
-                <span className="text-right text-sm tabular-nums">{c.leads > 0 ? formatCurrency(c.cpl) : '—'}</span>
+              <div key={c.name} className={cn('grid grid-cols-[2fr_1fr_0.8fr_1fr] gap-2 px-4 py-2.5 items-center border-b border-slate-50 last:border-0 hover:bg-slate-50/60', !c.managed && 'bg-slate-50/40')}>
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className={cn('text-sm font-semibold truncate', !c.managed && 'text-slate-400')} title={c.name}>{c.name}</span>
+                  {!c.managed && <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">No gestionada por Veta</span>}
+                </span>
+                <span className={cn('text-right text-sm tabular-nums', !c.managed && 'text-slate-400')}>{formatCurrency(c.spend)}</span>
+                <span className={cn('text-right text-sm tabular-nums font-semibold', !c.managed && 'text-slate-400 font-normal')}>{formatNumber(c.leads)}</span>
+                <span className={cn('text-right text-sm tabular-nums', !c.managed && 'text-slate-400')}>{c.leads > 0 ? formatCurrency(c.cpl) : '—'}</span>
               </div>
             ))}
             {campaignTypes.length === 0 && <p className="px-4 py-8 text-center text-sm text-slate-400">Sin campañas en el período.</p>}
           </Card>
+          {campaignTypes.some(c => !c.managed) && (
+            <p className="text-[11px] text-slate-400 mt-2">
+              Las campañas marcadas <span className="font-semibold text-slate-500">"No gestionada por Veta"</span> viven en la misma cuenta pero las maneja el cliente — se excluyen del CPL y el embudo comercial de arriba.
+            </p>
+          )}
         </section>
 
         {/* ── Mejores / peores anuncios ── */}
@@ -185,7 +195,7 @@ export default function SmartwayPublic() {
             <Card className="p-5 space-y-4">
               {google.leads === 0 && (
                 <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  ⚠ Google no tiene conversiones registradas en este período — el tracking de conversiones está a revisar con el equipo. Se ven inversión y clicks, pero no leads.
+                  ⚠ <span className="font-semibold">Sección en revisión.</span> Hay inversión y clicks, pero Google no registra conversiones en el período. Estamos validando si es un problema de <span className="font-semibold">tracking</span>, de <span className="font-semibold">volumen</span>, o si conviene reorientar la estrategia (ej. enfocar solo en <span className="font-semibold">remarketing</span>). Hasta confirmarlo, tomá estos números como inversión y tráfico, no como resultados.
                 </p>
               )}
               <FunnelView f={google} hideVisits />
@@ -206,7 +216,7 @@ export default function SmartwayPublic() {
         {/* ── Demografía ── */}
         {Object.keys(demographics).some(k => (demographics[k] ?? []).length > 0) && (
           <section>
-            <SectionTitle icon={<Users size={15} />} title="A quién le llegamos" hint="Distribución de inversión (Meta)" />
+            <SectionTitle icon={<Users size={15} />} title="Distribución de inversión por audiencia" hint="Meta · cuánto se invierte y CTR por segmento — no implica calidad de los leads" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {(['age', 'gender', 'region', 'publisher_platform'] as const).map(dim =>
                 (demographics[dim] ?? []).length
@@ -400,9 +410,13 @@ function DemoCard({ title, items, isGender }: { title: string; items: Demo[]; is
           const label = isGender ? (GENDER_ES[i.value] ?? i.value) : i.value;
           return (
             <div key={i.value}>
-              <div className="flex items-center justify-between text-[12px] mb-0.5">
+              <div className="flex items-center justify-between text-[12px] mb-0.5 gap-2">
                 <span className="font-semibold text-slate-700 truncate">{label}</span>
-                <span className="text-slate-400 tabular-nums">{formatCurrency(i.spend)}{i.leads > 0 ? ` · ${i.leads} lead${i.leads > 1 ? 's' : ''}` : ''}</span>
+                <span className="text-slate-400 tabular-nums shrink-0">
+                  {formatCurrency(i.spend)}
+                  {i.ctr > 0 ? <span className="text-slate-300"> · CTR {formatPercent(i.ctr)}</span> : null}
+                  {i.leads > 0 ? ` · ${i.leads} lead${i.leads > 1 ? 's' : ''}` : ''}
+                </span>
               </div>
               <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
                 <div className="h-full rounded-full bg-veta/70" style={{ width: `${(i.spend / max) * 100}%` }} />
