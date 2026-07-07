@@ -7,7 +7,8 @@ import { Card } from '@/components/ui/Card';
 import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
 import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
 
-const BASE = import.meta.env.DEV ? 'http://localhost:8888/.netlify/functions' : '/.netlify/functions';
+// Ruta relativa: bajo `netlify dev` (cualquier puerto) y en producción es same-origin.
+const BASE = '/.netlify/functions';
 
 function initialRange(): DateRange {
   const end = new Date().toISOString().split('T')[0];
@@ -48,6 +49,17 @@ export default function GribaPublic() {
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<DateRange>(initialRange());
 
+  // Título de pestaña + favicon con la marca Griba (solo esta página, no afecta a otras).
+  useEffect(() => {
+    const prevTitle = document.title;
+    document.title = 'Griba · Reporte de pauta';
+    let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+    const prevHref = link?.href ?? '';
+    if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+    link.href = '/griba-logo.png';
+    return () => { document.title = prevTitle; if (link) link.href = prevHref; };
+  }, []);
+
   useEffect(() => {
     setLoading(true);
     setError(null);
@@ -78,7 +90,7 @@ export default function GribaPublic() {
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-veta text-white grid place-items-center font-black text-lg">G</div>
+            <img src="/griba-logo.png" alt="Griba" className="w-10 h-10 rounded-xl shrink-0" />
             <div>
               <h1 className="text-lg font-black leading-none">{config.name}</h1>
               <p className="text-xs text-slate-500 mt-0.5">Reporte de pauta · Meta + Google</p>

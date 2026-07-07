@@ -27,8 +27,10 @@ export default function App() {
         {/* Reporte público de Smartway — link secreto sin login (gate por oscuridad).
             Para revocar acceso, cambiar este path y redeployar. */}
         <Route path="/smartway-reporte-2026" element={<SmartwayPublic />} />
-        {/* Reporte público de Griba — mismo patrón (link secreto, sin login). */}
-        <Route path="/griba-reporte-2026" element={<GribaPublic />} />
+        {/* Reporte público de Griba en /griba (link limpio para el cliente, sin login).
+            Ruta estática → gana sobre la dinámica /:clientSlug de más abajo. */}
+        <Route path="/griba" element={<GribaPublic />} />
+        <Route path="/griba-reporte-2026" element={<Navigate to="/griba" replace />} />
         <Route path="/" element={<Navigate to="/smartway-reporte-2026" replace />} />
 
         <Route path="/:clientSlug" element={<RequireAuth><AppLayout /></RequireAuth>}>
