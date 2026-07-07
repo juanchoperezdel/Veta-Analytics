@@ -2,6 +2,7 @@ import { useEffect, useState, Fragment, type ReactNode } from 'react';
 import {
   TrendingDown, Target, Trophy, AlertTriangle, Users, Loader2,
   Eye, MousePointerClick, ClipboardList, Globe, Flag, ExternalLink, BadgeCheck,
+  CalendarCheck, CheckCircle2, XCircle, CircleDashed,
 } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
@@ -36,7 +37,12 @@ type Data = {
   ads: { best: Ad[]; worst: Ad[] };
   google: GoogleData;
   demographics: Record<string, Demo[]>;
-  leadQuality: null | { qualified: number; unqualified: number; noResponse: number; meetings: number };
+  leadQuality: LeadQuality | null;
+};
+type QualByAd = { adId: string; adName: string; thumbnailUrl: string | null; previewLink: string | null; channel: string | null; vertical: string | null; total: number; qualified: number; unqualified: number; meetings: number; noResponse: number; unclassified: number };
+type LeadQuality = {
+  total: number; qualified: number; unqualified: number; meetings: number; noResponse: number; unclassified: number;
+  classified: number; updatedAt: string | null; byAd: QualByAd[];
 };
 
 const DEMO_LABELS: Record<string, string> = { age: 'Edad', gender: 'Género', region: 'Región', publisher_platform: 'Placement' };
@@ -77,7 +83,7 @@ export default function GribaPublic() {
   if (loading && !data) return <Status icon={<Loader2 className="animate-spin" />} title="Cargando el reporte de Griba…" />;
   if (error || !data) return <Status icon={<AlertTriangle />} title="No pudimos cargar el reporte" subtitle={error ?? ''} isError />;
 
-  const { overall, channels, verticals, ads, google, demographics, config } = data;
+  const { overall, channels, verticals, ads, google, demographics, config, leadQuality } = data;
   const metaSpend = overall.spend;
   const googleSpend = google.hasData ? google.spend : 0;
   const totalSpend = metaSpend + googleSpend;
@@ -201,24 +207,20 @@ export default function GribaPublic() {
           )}
         </section>
 
-        {/* ── Calidad de leads / CRM (estructura preparada) ── */}
+        {/* ── Calidad de leads / CRM ── */}
         <section>
-          <SectionTitle icon={<BadgeCheck size={15} className="text-slate-400" />} title="Calidad de los leads" hint="Cruce con el CRM de Griba" />
-          <Card className="p-5 border-dashed border-2 border-slate-200 bg-slate-50/40">
-            <div className="flex items-start gap-3">
-              <BadgeCheck size={22} className="text-slate-300 shrink-0 mt-0.5" />
-              <div className="text-sm text-slate-500 leading-relaxed">
-                <p className="font-bold text-slate-700 mb-1">Próximamente — se conecta con el CRM.</p>
-                <p>
-                  Hoy el reporte llega hasta el <b>lead</b> (contacto generado). Lo que sigue —si el lead
-                  fue <b>calificado</b>, si <b>respondió</b>, si se <b>agendó una reunión</b>— vive en el CRM de Griba.
-                  Cuando conectemos esa fuente, esta sección va a mostrar <b>qué anuncio trajo leads que realmente
-                  contestaron</b>, no solo cuál trajo más volumen. La estructura ya está lista para cruzar la calidad
-                  de cada lead con su campaña, conjunto, anuncio y producto.
-                </p>
+          <SectionTitle icon={<BadgeCheck size={15} className="text-veta" />} title="Calidad de los leads" hint="Cruce con el CRM (GoHighLevel)" />
+          {leadQuality ? <LeadQualityView lq={leadQuality} /> : (
+            <Card className="p-5 border-dashed border-2 border-slate-200 bg-slate-50/40">
+              <div className="flex items-start gap-3">
+                <BadgeCheck size={22} className="text-slate-300 shrink-0 mt-0.5" />
+                <div className="text-sm text-slate-500 leading-relaxed">
+                  <p className="font-bold text-slate-700 mb-1">Próximamente — se conecta con el CRM.</p>
+                  <p>Cuando entren los datos del CRM, acá vas a ver qué anuncio trajo leads que realmente se calificaron y con cuáles se agendó reunión.</p>
+                </div>
               </div>
-            </div>
-          </Card>
+            </Card>
+          )}
         </section>
 
         {/* ── Demografía ── */}
@@ -237,7 +239,7 @@ export default function GribaPublic() {
 
         <footer className="pt-4 pb-8 text-center text-[11px] text-slate-400">
           Datos directos de Meta Ads y Google Ads · Actualización automática cada hora · Veta Analytics<br />
-          <span className="text-slate-300">Leads calificados y reuniones (CRM) — próximamente</span>
+          <span className="text-slate-300">{leadQuality ? 'Calidad de leads cruzada con el CRM (GoHighLevel) · actualización diaria' : 'Leads calificados y reuniones (CRM) — próximamente'}</span>
         </footer>
       </main>
     </div>
@@ -497,6 +499,73 @@ function DemoCard({ title, items, isGender }: { title: string; items: Demo[]; is
           );
         })}
       </div>
+    </Card>
+  );
+}
+
+function LeadQualityView({ lq }: { lq: LeadQuality }) {
+  const pct = lq.total > 0 ? Math.round((lq.classified / lq.total) * 100) : 0;
+  const winners = lq.byAd.filter(a => a.qualified + a.meetings > 0);
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <QualKpi icon={<CheckCircle2 size={16} />} label="Calificados" value={lq.qualified} tone="good" />
+        <QualKpi icon={<CalendarCheck size={16} />} label="Reuniones agendadas" value={lq.meetings} tone="veta" />
+        <QualKpi icon={<XCircle size={16} />} label="No calificados" value={lq.unqualified} tone="bad" />
+        <QualKpi icon={<CircleDashed size={16} />} label="Sin clasificar" value={lq.unclassified} tone="muted" />
+      </div>
+      <p className="text-[11px] text-slate-400">
+        {lq.classified} de {lq.total} leads ya revisados por el equipo ({pct}%).
+        {lq.unclassified > 0 && ' El resto se va etiquetando en el CRM y esta sección se actualiza sola.'}
+      </p>
+
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Trophy size={14} className="text-veta" />
+          <h3 className="font-black text-sm">Anuncios que trajeron los mejores leads</h3>
+        </div>
+        {winners.length === 0 ? (
+          <p className="text-[12px] text-slate-400 py-4 text-center">
+            Todavía no hay leads calificados o reuniones atribuidos a un anuncio puntual. Aparecen acá a medida que el equipo los etiqueta en el CRM.
+          </p>
+        ) : (
+          <div className="space-y-1.5">
+            {winners.map(a => {
+              const row = (
+                <>
+                  <div className="w-9 h-9 rounded-md bg-slate-100 overflow-hidden shrink-0 grid place-items-center">
+                    {a.thumbnailUrl ? <img src={a.thumbnailUrl} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-[8px] text-slate-300">—</span>}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={cn('text-[12px] font-semibold truncate', a.previewLink && 'group-hover:text-veta group-hover:underline')} title={a.adName}>{a.adName}</p>
+                    <p className="text-[10px] text-slate-400 truncate">{a.channel === 'form' ? 'Formulario' : a.channel === 'landing' ? 'Landing' : ''}{a.vertical ? ` · ${a.vertical}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-bold tabular-nums">
+                    {a.qualified > 0 && <span className="inline-flex items-center gap-0.5 text-emerald-600" title="Calificados"><CheckCircle2 size={12} />{a.qualified}</span>}
+                    {a.meetings > 0 && <span className="inline-flex items-center gap-0.5 text-veta" title="Reuniones"><CalendarCheck size={12} />{a.meetings}</span>}
+                    {a.unqualified > 0 && <span className="inline-flex items-center gap-0.5 text-slate-300" title="No calificados"><XCircle size={12} />{a.unqualified}</span>}
+                  </div>
+                </>
+              );
+              return a.previewLink
+                ? <a key={a.adId} href={a.previewLink} target="_blank" rel="noopener noreferrer" className="group flex items-center gap-2.5" title="Ver el anuncio">{row}</a>
+                : <div key={a.adId} className="flex items-center gap-2.5">{row}</div>;
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function QualKpi({ icon, label, value, tone }: { icon: ReactNode; label: string; value: number; tone: 'good' | 'veta' | 'bad' | 'muted' }) {
+  const col = tone === 'good' ? 'text-emerald-600' : tone === 'veta' ? 'text-veta' : tone === 'bad' ? 'text-rose-500' : 'text-slate-400';
+  return (
+    <Card className="p-4">
+      <div className={cn('flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide', col)}>
+        {icon}<span className="text-slate-400">{label}</span>
+      </div>
+      <p className={cn('text-2xl font-black tabular-nums mt-1', col)}>{formatNumber(value)}</p>
     </Card>
   );
 }

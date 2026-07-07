@@ -1,6 +1,7 @@
 import { neon } from '@neondatabase/serverless';
 import { SignJWT, importPKCS8 } from 'jose';
 import { parseRoute } from './parse-routes';
+import { syncGhlLeads } from './ghl';
 
 const sql = neon(process.env.DATABASE_URL!);
 
@@ -914,7 +915,7 @@ async function main() {
   // service-account Google) siguen siendo globales (env). Si un ID está NULL en la DB,
   // se hace fallback a la env var global (mantiene a Andesmar funcionando como antes).
   const clients = await sql`
-    SELECT id, slug, meta_ad_account_id, google_ads_customer_id, ga4_property_id
+    SELECT id, slug, meta_ad_account_id, google_ads_customer_id, ga4_property_id, ghl_location_id
     FROM clients
     WHERE active = true
   `;
@@ -980,6 +981,20 @@ async function main() {
         const isAuth = String(e?.message ?? '').includes('invalid_grant') || String(e?.message ?? '').includes('expired');
         console.error(`  ✗ GA4${isAuth ? ' (token EXPIRADO — refrescar GA4_SERVICE_ACCOUNT_JSON)' : ''}:`, e?.message ?? e);
       }
+    }
+
+    // CRM (GoHighLevel) — calidad de leads. La location vive en la DB; el token
+    // es per-cliente por env: GHL_TOKEN_<SLUG> (ej: GHL_TOKEN_GRIBA).
+    const ghlLoc = client.ghl_location_id || null;
+    const ghlTok = process.env[`GHL_TOKEN_${String(client.slug).toUpperCase()}`] || null;
+    if (!ghlLoc) {
+      // sin CRM configurado para este cliente → se saltea en silencio
+    } else if (!ghlTok) {
+      console.log(`  ⊘ Sin GHL_TOKEN_${String(client.slug).toUpperCase()} — se saltea CRM para ${client.slug}`);
+    } else {
+      try {
+        await syncGhlLeads(client.id, ghlLoc, ghlTok);
+      } catch (e: any) { console.error(`  ✗ GHL CRM:`, e?.message ?? e); }
     }
   }
 

@@ -231,6 +231,42 @@ export default async (req: Request, _context: Context) => {
   const [metaUpd] = await sql`SELECT MAX(synced_at) s FROM meta_ads_creatives WHERE client_id = ${cid}`;
   const [gUpd] = await sql`SELECT MAX(synced_at) s FROM google_ads_campaigns WHERE client_id = ${cid}`;
 
+  // ─── Calidad de leads (CRM GoHighLevel) ──────────────────────────────────────
+  // Cruza cada lead del CRM (con su estado calificado/reunión/etc.) contra el
+  // anuncio que lo trajo (ad_id). null = todavía no hay datos de CRM.
+  const crmRows = await sql`SELECT ad_id, quality FROM crm_leads WHERE client_id = ${cid}`;
+  const [crmUpd] = await sql`SELECT MAX(synced_at) s FROM crm_leads WHERE client_id = ${cid}`;
+  let leadQuality: any = null;
+  if (crmRows.length > 0) {
+    const adById: Record<string, any> = {};
+    for (const a of allAds) adById[a.adId] = a;
+    const bump = (o: any, q: string) => {
+      o.total++;
+      if (q === 'qualified') o.qualified++;
+      else if (q === 'unqualified') o.unqualified++;
+      else if (q === 'meeting') o.meetings++;
+      else if (q === 'no_response') o.noResponse++;
+      else o.unclassified++;
+    };
+    const totals = { total: 0, qualified: 0, unqualified: 0, meetings: 0, noResponse: 0, unclassified: 0 };
+    const byAdMap: Record<string, any> = {};
+    for (const r of crmRows) {
+      bump(totals, r.quality);
+      if (r.ad_id) {
+        const m = (byAdMap[r.ad_id] ??= { adId: r.ad_id, total: 0, qualified: 0, unqualified: 0, meetings: 0, noResponse: 0, unclassified: 0 });
+        bump(m, r.quality);
+      }
+    }
+    const byAd = Object.values(byAdMap).map((m: any) => {
+      const ad = adById[m.adId];
+      return { ...m, adName: ad?.adName ?? '(anuncio)', thumbnailUrl: ad?.thumbnailUrl ?? null,
+               previewLink: ad?.previewLink ?? null, channel: ad?.channel ?? null, vertical: ad?.vertical ?? null };
+    }).sort((a: any, b: any) => (b.qualified + b.meetings) - (a.qualified + a.meetings) || b.total - a.total);
+    // % de leads ya clasificados (para avisar cobertura del CRM)
+    const classified = totals.qualified + totals.unqualified + totals.meetings + totals.noResponse;
+    leadQuality = { ...totals, classified, updatedAt: crmUpd?.s ?? null, byAd };
+  }
+
   const body = {
     config: {
       name: client.name, currency: 'ARS', period: { start, end },
@@ -244,12 +280,8 @@ export default async (req: Request, _context: Context) => {
     verticals,
     ads: { best, worst },
     google, demographics,
-    // Estructura lista para cruzar calidad de lead por ad_id cuando se conecte el CRM.
-    // null = "aún no integrado" → la UI muestra la sección en modo "próximamente".
-    leadQuality: null as null | {
-      qualified: number; unqualified: number; noResponse: number; meetings: number;
-      byAd: { adId: string; qualified: number; unqualified: number }[];
-    },
+    // Calidad de leads cruzada con el CRM (GoHighLevel). null = sin datos de CRM aún.
+    leadQuality,
   };
 
   return new Response(JSON.stringify(body), { headers });

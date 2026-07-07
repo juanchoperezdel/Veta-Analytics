@@ -352,6 +352,32 @@ CREATE TABLE IF NOT EXISTS client_budgets (
   UNIQUE (client_id, month)
 );
 
+-- ─── Calidad de leads desde el CRM (GoHighLevel) ───────────────────────────
+-- Una fila por contacto/lead del CRM. Se cruza con los anuncios de Meta por
+-- `ad_id` (= utmAdId de la atribución de GHL, mismo namespace que
+-- meta_ads_creatives.ad_id) o, de fallback, por `ad_name` (= utmContent).
+-- quality = estado derivado de las etiquetas del CRM:
+--   meeting | qualified | unqualified | no_response | unclassified
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS ghl_location_id TEXT;
+
+CREATE TABLE IF NOT EXISTS crm_leads (
+  id           SERIAL PRIMARY KEY,
+  client_id    TEXT NOT NULL REFERENCES clients(id),
+  contact_id   TEXT NOT NULL,          -- id del contacto en GHL
+  ad_id        TEXT,                   -- utmAdId (join con meta_ads_creatives.ad_id)
+  ad_name      TEXT,                   -- utmContent (nombre del anuncio, fallback de join)
+  campaign     TEXT,                   -- utmCampaign
+  form_name    TEXT,
+  source       TEXT,                   -- facebook / instagram / etc
+  quality      TEXT,                   -- meeting|qualified|unqualified|no_response|unclassified
+  tags         TEXT[],                 -- etiquetas crudas del CRM (trazabilidad)
+  date_added   TIMESTAMPTZ,            -- cuándo entró el lead al CRM
+  synced_at    TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (client_id, contact_id)
+);
+CREATE INDEX IF NOT EXISTS idx_crm_leads_ad   ON crm_leads (client_id, ad_id);
+CREATE INDEX IF NOT EXISTS idx_crm_leads_qual ON crm_leads (client_id, quality);
+
 -- Videos de YouTube Ads
 CREATE TABLE IF NOT EXISTS youtube_videos (
   id               SERIAL PRIMARY KEY,

@@ -37,14 +37,15 @@ const CLIENTS = [
     meta_ad_account_id: '1389164124601064',
     google_ads_customer_id: '1558138541',
     ga4_property_id: null, // Griba no tiene GA4 conectado → el sync saltea GA4
+    ghl_location_id: 'L3lXU86W3GXKyWO98mp0', // CRM GoHighLevel (whitelabel vetastation)
     active: true,
   },
 ];
 
 for (const c of CLIENTS) {
   await sql`
-    INSERT INTO clients (id, slug, name, logo_initial, meta_ad_account_id, google_ads_customer_id, ga4_property_id, active)
-    VALUES (${c.id}, ${c.slug}, ${c.name}, ${c.logo_initial}, ${c.meta_ad_account_id}, ${c.google_ads_customer_id}, ${c.ga4_property_id}, ${c.active})
+    INSERT INTO clients (id, slug, name, logo_initial, meta_ad_account_id, google_ads_customer_id, ga4_property_id, ghl_location_id, active)
+    VALUES (${c.id}, ${c.slug}, ${c.name}, ${c.logo_initial}, ${c.meta_ad_account_id}, ${c.google_ads_customer_id}, ${c.ga4_property_id}, ${(c as any).ghl_location_id ?? null}, ${c.active})
     ON CONFLICT (id) DO UPDATE SET
       slug                   = EXCLUDED.slug,
       name                   = EXCLUDED.name,
@@ -52,9 +53,10 @@ for (const c of CLIENTS) {
       meta_ad_account_id     = EXCLUDED.meta_ad_account_id,
       google_ads_customer_id = EXCLUDED.google_ads_customer_id,
       ga4_property_id        = EXCLUDED.ga4_property_id,
+      ghl_location_id        = EXCLUDED.ghl_location_id,
       active                 = EXCLUDED.active
   `;
-  console.log(`✓ ${c.name} (${c.slug}) — active=${c.active} meta=${c.meta_ad_account_id} google=${c.google_ads_customer_id} ga4=${c.ga4_property_id ?? '—'}`);
+  console.log(`✓ ${c.name} (${c.slug}) — active=${c.active} meta=${c.meta_ad_account_id} google=${c.google_ads_customer_id} ga4=${c.ga4_property_id ?? '—'} ghl=${(c as any).ghl_location_id ?? '—'}`);
 }
 
 console.log('\n✓ Clientes sembrados.');
