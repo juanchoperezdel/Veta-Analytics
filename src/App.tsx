@@ -31,7 +31,8 @@ export default function App() {
             Ruta estática → gana sobre la dinámica /:clientSlug de más abajo. */}
         <Route path="/griba" element={<GribaPublic />} />
         <Route path="/griba-reporte-2026" element={<Navigate to="/griba" replace />} />
-        <Route path="/" element={<Navigate to="/smartway-reporte-2026" replace />} />
+        {/* La raíz NO debe exponer el reporte de ningún cliente → va al login interno. */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
 
         <Route path="/:clientSlug" element={<RequireAuth><AppLayout /></RequireAuth>}>
           <Route index element={<Navigate to="pulse" replace />} />
