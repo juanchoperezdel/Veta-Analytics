@@ -29,6 +29,16 @@ const CLIENTS = [
     ga4_property_id: null, // Smartway no tiene GA4 conectado → el sync saltea GA4
     active: true,
   },
+  {
+    id: '3',
+    slug: 'griba',
+    name: 'Griba',
+    logo_initial: 'G',
+    meta_ad_account_id: '1389164124601064',
+    google_ads_customer_id: '1558138541',
+    ga4_property_id: null, // Griba no tiene GA4 conectado → el sync saltea GA4
+    active: true,
+  },
 ];
 
 for (const c of CLIENTS) {

@@ -12,6 +12,7 @@ import Pulse from './pages/Pulse';
 import Funnel from './pages/Funnel';
 import Seasonality from './pages/Seasonality';
 import SmartwayPublic from './pages/SmartwayPublic';
+import GribaPublic from './pages/GribaPublic';
 import { getToken } from './lib/api';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -26,6 +27,8 @@ export default function App() {
         {/* Reporte público de Smartway — link secreto sin login (gate por oscuridad).
             Para revocar acceso, cambiar este path y redeployar. */}
         <Route path="/smartway-reporte-2026" element={<SmartwayPublic />} />
+        {/* Reporte público de Griba — mismo patrón (link secreto, sin login). */}
+        <Route path="/griba-reporte-2026" element={<GribaPublic />} />
         <Route path="/" element={<Navigate to="/smartway-reporte-2026" replace />} />
 
         <Route path="/:clientSlug" element={<RequireAuth><AppLayout /></RequireAuth>}>
