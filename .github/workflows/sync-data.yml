@@ -8,7 +8,9 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 10 min quedó corto al sumar Google (10k+ search terms) + 2do cliente + CRM.
+    # El sync es idempotente, no pasa nada si tarda; subimos el techo.
+    timeout-minutes: 25
 
     steps:
       - uses: actions/checkout@v4
