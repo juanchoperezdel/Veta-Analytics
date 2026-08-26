@@ -40,6 +40,16 @@ const CLIENTS = [
     ghl_location_id: 'L3lXU86W3GXKyWO98mp0', // CRM GoHighLevel (whitelabel vetastation)
     active: true,
   },
+  {
+    id: '4',
+    slug: 'controlpet',
+    name: 'ControlPet',
+    logo_initial: 'C',
+    meta_ad_account_id: '1046328434650389',
+    google_ads_customer_id: '9742955044',
+    ga4_property_id: null, // ControlPet no tiene GA4 conectado -> el sync saltea GA4
+    active: true,
+  },
 ];
 
 for (const c of CLIENTS) {
