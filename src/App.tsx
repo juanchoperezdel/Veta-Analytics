@@ -13,6 +13,7 @@ import Funnel from './pages/Funnel';
 import Seasonality from './pages/Seasonality';
 import SmartwayPublic from './pages/SmartwayPublic';
 import GribaPublic from './pages/GribaPublic';
+import ControlPetPublic from './pages/ControlPetPublic';
 import { getToken } from './lib/api';
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -31,6 +32,10 @@ export default function App() {
             Ruta estática → gana sobre la dinámica /:clientSlug de más abajo. */}
         <Route path="/griba" element={<GribaPublic />} />
         <Route path="/griba-reporte-2026" element={<Navigate to="/griba" replace />} />
+        {/* Reporte público de ControlPet, sin login. Ruta estática → gana sobre la
+            dinámica /:clientSlug, pero solo en el path exacto: /controlpet/pulse y las
+            demás subrutas siguen yendo al panel interno autenticado. */}
+        <Route path="/controlpet" element={<ControlPetPublic />} />
         {/* La raíz NO debe exponer el reporte de ningún cliente → va al login interno. */}
         <Route path="/" element={<Navigate to="/login" replace />} />
 
