@@ -176,7 +176,7 @@ async function backfillGoogleAds(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {
@@ -239,7 +239,7 @@ async function backfillYouTube(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {

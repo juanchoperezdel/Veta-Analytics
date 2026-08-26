@@ -174,7 +174,7 @@ async function syncGoogleAds(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v21/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {
@@ -245,7 +245,7 @@ async function syncYouTube(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`,
+    `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:search`,
     {
       method: 'POST',
       headers: {
@@ -310,7 +310,7 @@ async function syncGoogleAdsSearchTerms(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v21/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {
@@ -609,7 +609,7 @@ async function syncGoogleAdsHourly(clientId: string, customerId: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v21/customers/${customerId}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v24/customers/${customerId}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {

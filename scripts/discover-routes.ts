@@ -263,7 +263,7 @@ async function probeGoogleSearchTerms(token: string) {
   `;
 
   const res = await fetch(
-    `https://googleads.googleapis.com/v20/customers/${GADS_CUSTOMER_ID}/googleAds:searchStream`,
+    `https://googleads.googleapis.com/v24/customers/${GADS_CUSTOMER_ID}/googleAds:searchStream`,
     {
       method: 'POST',
       headers: {
