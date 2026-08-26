@@ -44,6 +44,8 @@ type Data = {
 
 const DEMO_LABELS: Record<string, string> = { age: 'Edad', gender: 'Género', region: 'Región', publisher_platform: 'Placement' };
 const GENDER_ES: Record<string, string> = { male: 'Hombres', female: 'Mujeres', unknown: 'Sin dato' };
+// Meta devuelve los placements en minuscula ('instagram') -> se muestran con el nombre real.
+const PLACEMENT_ES: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook', messenger: 'Messenger', audience_network: 'Audience Network', threads: 'Threads', whatsapp: 'WhatsApp' };
 // Color de los graficos: turquesa de ControlPet, un paso mas saturado para que pase
 // las validaciones de croma y contraste (>=3:1 sobre superficie clara).
 const CHART_COLOR = '#0A9396';
@@ -278,7 +280,7 @@ export default function ControlPetPublic() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {(['age', 'gender', 'region', 'publisher_platform'] as const).map(dim =>
                 (demographics[dim] ?? []).length
-                  ? <Fragment key={dim}><DemoCard title={DEMO_LABELS[dim]} items={demographics[dim]} isGender={dim === 'gender'} /></Fragment>
+                  ? <Fragment key={dim}><DemoCard title={DEMO_LABELS[dim]} items={demographics[dim]} labels={dim === 'gender' ? GENDER_ES : dim === 'publisher_platform' ? PLACEMENT_ES : undefined} /></Fragment>
                   : null
               )}
             </div>
@@ -502,14 +504,14 @@ function AdCard({ ad, tone }: { ad: Ad; tone: 'good' | 'bad' }) {
   );
 }
 
-function DemoCard({ title, items, isGender }: { title: string; items: Demo[]; isGender?: boolean }) {
+function DemoCard({ title, items, labels }: { title: string; items: Demo[]; labels?: Record<string, string> }) {
   const max = Math.max(...items.map(i => i.spend), 1);
   return (
     <Card className="p-4">
       <p className="text-sm font-black mb-3">{title}</p>
       <div className="space-y-2">
         {items.map(i => {
-          const label = isGender ? (GENDER_ES[i.value] ?? i.value) : i.value;
+          const label = labels?.[i.value] ?? i.value;
           return (
             <div key={i.value}>
               <div className="flex items-center justify-between text-[12px] mb-0.5 gap-2">
