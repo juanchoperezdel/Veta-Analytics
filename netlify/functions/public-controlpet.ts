@@ -136,6 +136,24 @@ export default async (req: Request, _context: Context) => {
   const best = (withLeads.length ? withLeads : [...leadgenAds].sort((a, b) => b.ctr - a.ctr)).slice(0, 8).map(adOut);
   const worst = noLeads.slice(0, 8).map(adOut);
 
+  // ─── Serie diaria (evolución) ────────────────────────────────────────────────
+  // Responde "¿esto viene mejorando?", que es lo que el reporte no contestaba.
+  // El día de hoy está EN CURSO: se marca `partial` para que el front no lo muestre
+  // como una caída (a media mañana siempre parece que se desplomó).
+  const dailyRows = await sql`
+    SELECT snapshot_date::text d, SUM(spend)::numeric spend,
+           SUM(impressions)::bigint impressions, SUM(clicks)::bigint clicks,
+           SUM(purchases)::bigint leads
+    FROM meta_ads_creatives
+    WHERE client_id = ${cid} AND snapshot_date BETWEEN ${start} AND ${end}
+    GROUP BY snapshot_date ORDER BY snapshot_date`;
+  const today = todayISO();
+  const daily = dailyRows.map((r: any) => {
+    const spend = Number(r.spend), leads = Number(r.leads);
+    return { date: r.d, spend, impressions: Number(r.impressions), clicks: Number(r.clicks),
+             leads, cpl: leads > 0 ? spend / leads : 0, partial: r.d === today };
+  });
+
   // ─── Campañas de Meta (tabla simple) ─────────────────────────────────────────
   const byCamp: Record<string, Agg> = {};
   for (const a of leadgenAds) { (byCamp[a.campaignName || '(sin nombre)'] ??= emptyAgg()); addAgg(byCamp[a.campaignName || '(sin nombre)'], a); }
@@ -211,6 +229,7 @@ export default async (req: Request, _context: Context) => {
       googleUpdatedAt: gUpd?.s ?? null,
     },
     overall,
+    daily,
     zones,
     campaigns,
     ads: { best, worst },

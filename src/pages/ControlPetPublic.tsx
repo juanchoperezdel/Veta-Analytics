@@ -1,8 +1,9 @@
 import { useEffect, useState, Fragment, type ReactNode } from 'react';
 import {
   TrendingDown, Target, Trophy, AlertTriangle, Users, Loader2,
-  Eye, MousePointerClick, MapPin, ExternalLink, BadgeCheck,
+  Eye, MousePointerClick, MapPin, ExternalLink, BadgeCheck, LineChart as LineChartIcon,
 } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Card } from '@/components/ui/Card';
 import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
 import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
@@ -25,12 +26,14 @@ type Funnel = {
 };
 type Ad = { adId: string; adName: string; campaignName?: string; zone?: string; thumbnailUrl: string | null; previewLink?: string | null; spend: number; impressions?: number; clicks?: number; leads: number; ctr: number; cpl: number };
 type Zone = Funnel & { name: string; adCount: number; ads: Ad[] };
+type DailyPoint = { date: string; spend: number; impressions: number; clicks: number; leads: number; cpl: number; partial: boolean };
 type Campaign = { name: string; zone: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number };
 type Demo = { value: string; spend: number; leads: number; cpl: number; ctr: number };
 type GoogleData = Funnel & { hasData: boolean; isPmax: boolean; campaigns: { name: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
 type Data = {
   config: { name: string; currency: string; period: { start: string; end: string }; firstDataDate: string | null; generatedAt: string; dataUpdatedAt: string | null; metaUpdatedAt: string | null; googleUpdatedAt: string | null };
   overall: Funnel;
+  daily: DailyPoint[];
   zones: Zone[];
   campaigns: Campaign[];
   ads: { best: Ad[]; worst: Ad[] };
@@ -41,8 +44,17 @@ type Data = {
 
 const DEMO_LABELS: Record<string, string> = { age: 'Edad', gender: 'Género', region: 'Región', publisher_platform: 'Placement' };
 const GENDER_ES: Record<string, string> = { male: 'Hombres', female: 'Mujeres', unknown: 'Sin dato' };
+// Color de los graficos: turquesa de ControlPet, un paso mas saturado para que pase
+// las validaciones de croma y contraste (>=3:1 sobre superficie clara).
+const CHART_COLOR = '#0A9396';
 // Paleta de la marca ControlPet: navy + turquesa (del logo).
 const ZONE_COLOR: Record<string, string> = { 'Córdoba': '#18243C', 'Mendoza': '#54A8A8', 'Remarketing': '#7c3aed', 'General': '#64748b' };
+
+// Etiqueta corta para el eje X: 21/08
+function fmtShort(d: string) {
+  const [, m, day] = d.split('-');
+  return `${day}/${m}`;
+}
 
 function fmtDay(d: string) {
   const [y, m, day] = d.split('-');
@@ -83,7 +95,7 @@ export default function ControlPetPublic() {
   if (loading && !data) return <Status icon={<Loader2 className="animate-spin" />} title="Cargando el reporte de ControlPet…" />;
   if (error || !data) return <Status icon={<AlertTriangle />} title="No pudimos cargar el reporte" subtitle={error ?? ''} isError />;
 
-  const { overall, zones, campaigns, ads, google, demographics, config } = data;
+  const { overall, daily, zones, campaigns, ads, google, demographics, config } = data;
   const metaSpend = overall.spend;
   const googleSpend = google.hasData ? google.spend : 0;
   const totalSpend = metaSpend + googleSpend;
@@ -145,6 +157,22 @@ export default function ControlPetPublic() {
             <FunnelView f={overall} />
           </Card>
         </section>
+
+        {/* ── Evolución diaria ── */}
+        {daily.length > 1 && (
+          <section>
+            <SectionTitle icon={<LineChartIcon size={15} />} title="Cómo viene evolucionando" hint="Día a día · inversión y contactos" />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <DailyChart data={daily} metric="spend" title="Inversión por día" isCurrency />
+              <DailyChart data={daily} metric="leads" title="Contactos por día" />
+            </div>
+            {daily.some(d => d.partial) && (
+              <p className="text-[11px] text-slate-400 mt-2">
+                La última barra es del día de hoy, que todavía está en curso — por eso queda más baja y en un tono más claro.
+              </p>
+            )}
+          </section>
+        )}
 
         {/* ── Por zona ── */}
         {zones.length > 0 && (
@@ -306,6 +334,44 @@ function FunnelView({ f, leadLabel }: { f: Funnel; leadLabel?: string }) {
         );
       })}
     </div>
+  );
+}
+
+// ─── Evolución diaria ──────────────────────────────────────────────────────────
+// Small multiples: inversión y contactos tienen escalas distintas, así que van en DOS
+// gráficos con el MISMO color (los distingue el título), nunca en un eje doble.
+// El día en curso se dibuja más claro + se aclara con texto: el color solo no alcanza.
+function DailyChart({ data, metric, title, isCurrency }: { data: DailyPoint[]; metric: 'spend' | 'leads'; title: string; isCurrency?: boolean }) {
+  const rows = data.map(d => ({ ...d, label: fmtShort(d.date), value: metric === 'spend' ? d.spend : d.leads }));
+  const fmt = (v: number) => (isCurrency ? formatCurrency(v) : formatNumber(v));
+  const total = rows.reduce((acc, r) => acc + r.value, 0);
+  return (
+    <Card className="p-4">
+      <div className="flex items-baseline justify-between mb-3">
+        <h3 className="font-black text-sm">{title}</h3>
+        <span className="text-[11px] text-slate-400 tabular-nums">{fmt(total)} en total</span>
+      </div>
+      <div style={{ width: '100%', height: 180 }}>
+        <ResponsiveContainer>
+          <BarChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: -12 }} barCategoryGap="18%">
+            {/* grid recesivo: solo horizontal, sin líneas verticales que compitan con las barras */}
+            <CartesianGrid vertical={false} stroke="#e9edf1" />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} interval="preserveStartEnd" />
+            <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} width={48}
+                   tickFormatter={(v: number) => (isCurrency ? `$${Math.round(v / 1000)}k` : String(v))} />
+            <Tooltip
+              cursor={{ fill: 'rgba(10,147,150,0.07)' }}
+              contentStyle={{ borderRadius: 10, border: '1px solid #e2e8f0', fontSize: 12, boxShadow: '0 4px 14px rgba(15,23,42,.08)' }}
+              labelFormatter={(l: string) => l}
+              formatter={(v: number, _n: string, p: any) => [fmt(v) + (p?.payload?.partial ? ' (día en curso)' : ''), title]}
+            />
+            <Bar dataKey="value" radius={[4, 4, 0, 0]} isAnimationActive={false}>
+              {rows.map(r => <Cell key={r.date} fill={CHART_COLOR} fillOpacity={r.partial ? 0.4 : 1} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </Card>
   );
 }
 
