@@ -1,7 +1,7 @@
 import { useEffect, useState, Fragment, type ReactNode } from 'react';
 import {
   TrendingDown, Target, Trophy, AlertTriangle, Users, Loader2,
-  Eye, MousePointerClick, MapPin, ExternalLink, BadgeCheck, LineChart as LineChartIcon,
+  Eye, MousePointerClick, MapPin, ExternalLink, LineChart as LineChartIcon,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Card } from '@/components/ui/Card';
@@ -24,7 +24,7 @@ type Funnel = {
   ctr: number; cpm: number; cpc: number; cpl: number; frequency: number;
   clickRate: number; leadRate: number;
 };
-type Ad = { adId: string; adName: string; campaignName?: string; zone?: string; thumbnailUrl: string | null; previewLink?: string | null; spend: number; impressions?: number; clicks?: number; leads: number; ctr: number; cpl: number };
+type Ad = { adId: string; adName: string; campaignName?: string; zone?: string; variants?: number; thumbnailUrl: string | null; previewLink?: string | null; spend: number; impressions?: number; clicks?: number; leads: number; ctr: number; cpl: number };
 type Zone = Funnel & { name: string; adCount: number; ads: Ad[] };
 type DailyPoint = { date: string; spend: number; impressions: number; clicks: number; leads: number; cpl: number; partial: boolean };
 type Campaign = { name: string; zone: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number };
@@ -259,19 +259,9 @@ export default function ControlPetPublic() {
           )}
         </section>
 
-        {/* ── Calidad de leads / CRM ── */}
-        <section>
-          <SectionTitle icon={<BadgeCheck size={15} className="text-veta" />} title="Calidad de los leads" hint="Requiere conectar el CRM" />
-          <Card className="p-5 border-dashed border-2 border-slate-200 bg-slate-50/40">
-            <div className="flex items-start gap-3">
-              <BadgeCheck size={22} className="text-slate-300 shrink-0 mt-0.5" />
-              <div className="text-sm text-slate-500 leading-relaxed">
-                <p className="font-bold text-slate-700 mb-1">Próximamente — se conecta con el CRM.</p>
-                <p>Hoy el reporte llega hasta el lead. Cuando conectemos el CRM vas a ver, para cada anuncio, cuántos de esos contactos se calificaron y con cuáles se agendó demo — que es lo que en definitiva dice si la pauta funciona.</p>
-              </div>
-            </div>
-          </Card>
-        </section>
+        {/* La seccion de calidad de leads (CRM) queda OCULTA por decision del owner
+            hasta que se defina la fuente. El endpoint ya devuelve `leadQuality` y el
+            cruce por ad_id esta listo: para reactivarla, portar el bloque de GribaPublic. */}
 
         {/* ── Demografía ── */}
         {Object.keys(demographics).some(k => (demographics[k] ?? []).length > 0) && (
@@ -288,8 +278,7 @@ export default function ControlPetPublic() {
         )}
 
         <footer className="pt-4 pb-8 text-center text-[11px] text-slate-400">
-          Datos directos de Meta Ads y Google Ads · Actualización automática cada hora · Veta Analytics<br />
-          <span className="text-slate-300">Leads calificados y demos agendadas (CRM) — próximamente</span>
+          Datos directos de Meta Ads y Google Ads · Actualización automática cada hora · Veta Analytics
         </footer>
       </main>
     </div>

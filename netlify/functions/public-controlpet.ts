@@ -57,13 +57,13 @@ function buildFunnel(a: Agg) {
 }
 
 type AdRow = {
-  adId: string; adName: string; campaignName: string; zone: string;
+  adId: string; adName: string; campaignName: string; zone: string; variants: number;
   thumbnailUrl: string | null; status: string | null; previewLink: string | null;
   spend: number; impressions: number; clicks: number; leads: number; reach: number;
   ctr: number; cpl: number;
 };
 function adOut(a: AdRow) {
-  return { adId: a.adId, adName: a.adName, campaignName: a.campaignName, zone: a.zone,
+  return { adId: a.adId, adName: a.adName, campaignName: a.campaignName, zone: a.zone, variants: a.variants,
            thumbnailUrl: a.thumbnailUrl, previewLink: a.previewLink, spend: a.spend,
            impressions: a.impressions, clicks: a.clicks, leads: a.leads, ctr: a.ctr, cpl: a.cpl };
 }
@@ -97,7 +97,7 @@ export default async (req: Request, _context: Context) => {
     const campaignName = a.campaign_name ?? '';
     const adName = a.ad_name ?? '(sin nombre)';
     return {
-      adId: a.ad_id, adName, campaignName,
+      adId: a.ad_id, adName, campaignName, variants: 1,
       zone: classifyZone(campaignName),
       thumbnailUrl: a.thumbnail_url ?? null, status: a.status, previewLink: a.preview_link ?? null,
       spend, impressions, clicks, leads, reach,
@@ -106,7 +106,35 @@ export default async (req: Request, _context: Context) => {
     };
   });
 
-  const leadgenAds = allAds.filter(a => isManaged(a.campaignName));
+  const managedAds = allAds.filter(a => isManaged(a.campaignName));
+
+  // El MISMO aviso corre en varios ad sets de una campaña → Meta le da un `ad_id` distinto
+  // a cada copia, con el mismo nombre y el mismo creativo. Listarlos por ad_id mostraba
+  // "Ad3_Agosto" dos veces con números partidos. Se agrupan por (campaña + nombre) y se
+  // suman: para el cliente es un solo aviso. `variants` deja registro de cuántas copias son.
+  const byCreative = new Map<string, AdRow>();
+  for (const a of managedAds) {
+    const key = `${a.campaignName}||${a.adName}`;
+    const prev = byCreative.get(key);
+    if (!prev) { byCreative.set(key, { ...a }); continue; }
+    // el ad_id/preview/thumbnail representativo es el de la copia que más gastó
+    const lead = a.spend > prev.spend ? a : prev;
+    byCreative.set(key, {
+      ...lead,
+      variants: prev.variants + a.variants,
+      spend: prev.spend + a.spend,
+      impressions: prev.impressions + a.impressions,
+      clicks: prev.clicks + a.clicks,
+      leads: prev.leads + a.leads,
+      reach: prev.reach + a.reach,
+      ctr: 0, cpl: 0, // se recalculan abajo sobre el total
+    });
+  }
+  const leadgenAds: AdRow[] = [...byCreative.values()].map(a => ({
+    ...a,
+    ctr: a.impressions > 0 ? a.clicks / a.impressions : 0,
+    cpl: a.leads > 0 ? a.spend / a.leads : 0,
+  }));
 
   // Funnel general = toda la pauta de Meta
   const overallAgg = emptyAgg();
@@ -127,7 +155,9 @@ export default async (req: Request, _context: Context) => {
 
   // ─── Mejores / peores anuncios ───────────────────────────────────────────────
   // Piso de gasto para "peores": sin él, un ad con $200 y 0 leads aparece como problema.
-  const SPEND_FLOOR = 1500;
+  // Calibrado después de agrupar por creativo: con $1.500 se ocultaban tres avisos que
+  // juntos se llevaron $3.159 sin traer un solo contacto, que es justo lo que hay que ver.
+  const SPEND_FLOOR = 800;
   // Orden: primero los que MÁS leads trajeron, y a igual volumen el de menor costo.
   // Ordenar por CPL puro dejaba arriba un ad con 1 lead barato por azar y hundía al que
   // trajo 17 — para el cliente eso es engañoso.
