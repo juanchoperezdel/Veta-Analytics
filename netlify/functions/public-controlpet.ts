@@ -275,23 +275,52 @@ export default async (req: Request, _context: Context) => {
     }
   }
 
-  // 2) Cuánto depende el resultado de un solo aviso
+  // 2) El ganador. OJO CON EL TONO: que un aviso concentre los contactos es cómo
+  // funciona Meta — el algoritmo prueba, encuentra el que rinde y le vuelca la
+  // entrega. Es una buena noticia, no una fragilidad. Solo si la dependencia es
+  // extrema Y no hay un segundo aviso con volumen se agrega el matiz, y aun así
+  // como dato, nunca como alarma.
   if (best.length > 0 && overall.leads > 0) {
     const star = best[0];
-    if (star.leads / overall.leads >= 0.4) notes.push({
-      tone: 'info',
-      text: `Un solo aviso ("${star.adName}" de ${star.zone}) trajo ${star.leads} de los ${overall.leads} contactos, a ${money(star.cpl)} cada uno. Es el que está sosteniendo la campaña.`,
-    });
+    const share = star.leads / overall.leads;
+    if (share >= 0.4) {
+      const second = best[1];
+      const secondOk = second && second.leads >= Math.max(2, star.leads * 0.25);
+      notes.push({
+        tone: 'good',
+        text: secondOk
+          ? `Meta ya encontró lo que funciona: "${star.adName}" (${star.zone}) trajo ${star.leads} de los ${overall.leads} contactos a ${money(star.cpl)} cada uno, con "${second.adName}" acompañando. El presupuesto se está volcando solo a lo que rinde.`
+          : `Meta ya encontró lo que funciona: "${star.adName}" (${star.zone}) trajo ${star.leads} de los ${overall.leads} contactos a ${money(star.cpl)} cada uno. Conviene ir preparando un segundo aviso que lo acompañe, para cuando este se desgaste.`,
+      });
+    }
   }
 
-  // 3) Plata en avisos que no devuelven
-  const deadSpend = leadgenAds.filter(a => a.leads === 0).reduce((acc, a) => acc + a.spend, 0);
-  if (deadSpend > 0 && overall.spend > 0 && deadSpend / overall.spend >= 0.03) {
-    const n = leadgenAds.filter(a => a.leads === 0).length;
-    notes.push({
-      tone: 'warn',
-      text: `${n} aviso${n > 1 ? 's' : ''} se llev${n > 1 ? 'aron' : 'ó'} ${money(deadSpend)} (${pct(deadSpend / overall.spend)} de la inversión) sin traer contactos. Es lo primero para revisar o pausar.`,
-    });
+  // 3) Avisos sin contactos. OJO CON EL TONO: que varios avisos no traigan nada NO es
+  // un problema, es cómo aprende Meta — reparte, mide y corta. Esa plata es el costo
+  // de descubrir cuál funciona. Solo pasa a advertencia si la porción es DESPROPORCIONADA
+  // (más de un tercio del presupuesto) o si un aviso suelto se comió mucho sin devolver.
+  const deadAds = leadgenAds.filter(a => a.leads === 0);
+  const deadSpend = deadAds.reduce((acc, a) => acc + a.spend, 0);
+  const deadShare = overall.spend > 0 ? deadSpend / overall.spend : 0;
+  const worstSingle = [...deadAds].sort((a, b) => b.spend - a.spend)[0];
+  const singleShare = worstSingle && overall.spend > 0 ? worstSingle.spend / overall.spend : 0;
+  if (deadAds.length > 0 && deadShare >= 0.03) {
+    if (deadShare > 0.35) {
+      notes.push({
+        tone: 'warn',
+        text: `${pct(deadShare)} del presupuesto (${money(deadSpend)}) se fue en avisos que no trajeron contactos. Es una porción alta: vale la pena cortar los que ya tuvieron prueba suficiente y concentrar en los que rinden.`,
+      });
+    } else if (singleShare >= 0.15) {
+      notes.push({
+        tone: 'warn',
+        text: `El aviso "${worstSingle.adName}" (${worstSingle.zone}) se llevó ${money(worstSingle.spend)} — ${pct(singleShare)} de la inversión — sin traer un solo contacto. Ese sí conviene cortarlo.`,
+      });
+    } else {
+      notes.push({
+        tone: 'info',
+        text: `${deadAds.length} de los ${leadgenAds.length} avisos no trajeron contactos y se llevaron ${money(deadSpend)} (${pct(deadShare)} de la inversión). Es lo normal y lo esperable: Meta reparte para probar, mide cuál funciona y vuelca el resto del presupuesto ahí. Esa parte es el costo de averiguarlo.`,
+      });
+    }
   }
 
   // 4) Tendencia: primera mitad vs segunda mitad del período (excluyendo el día en curso)
@@ -317,7 +346,7 @@ export default async (req: Request, _context: Context) => {
     const [, m, d] = googleLastActiveDay.split('-');
     notes.push({
       tone: 'warn',
-      text: `Google no muestra avisos desde el ${d}/${m}: lleva ${daysSinceGoogle} días sin gastar aunque la campaña figura activa. Lo estamos revisando con Google.`,
+      text: `Google dejó de mostrar avisos el ${d}/${m} (${daysSinceGoogle} días) aunque la campaña figura activa. Lo estamos destrabando; mientras tanto los contactos siguen entrando por Meta.`,
     });
   }
 

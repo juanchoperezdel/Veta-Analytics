@@ -2,7 +2,7 @@ import { useEffect, useState, Fragment, type ReactNode } from 'react';
 import {
   TrendingDown, Target, Trophy, AlertTriangle, Users, Loader2,
   Eye, MousePointerClick, MapPin, ExternalLink, LineChart as LineChartIcon,
-  TrendingUp, Info, ClipboardList,
+  TrendingUp, Info, ClipboardList, Filter,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Card } from '@/components/ui/Card';
@@ -213,7 +213,8 @@ export default function ControlPetPublic() {
 
         {ads.worst.length > 0 && (
           <section>
-            <SectionTitle icon={<AlertTriangle size={15} className="text-amber-500" />} title="Anuncios para revisar" hint="Gastaron pero no trajeron leads" />
+            {/* Sin icono de alerta: que Meta descarte avisos es parte del testeo, no una falla. */}
+            <SectionTitle icon={<Filter size={15} />} title="Los que Meta fue dejando de lado" hint="Tuvieron prueba y no trajeron contactos — el algoritmo ya les bajó la entrega" />
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {ads.worst.map(a => <Fragment key={a.adId}><AdCard ad={a} tone="bad" /></Fragment>)}
             </div>
@@ -521,7 +522,7 @@ function AdCard({ ad, tone }: { ad: Ad; tone: 'good' | 'bad' }) {
           <span className="text-slate-400">{formatCurrency(ad.spend)}</span>
           {tone === 'good'
             ? <span className="font-bold text-veta">{ad.leads > 0 ? `${ad.leads} lead${ad.leads > 1 ? 's' : ''}` : `CTR ${formatPercent(ad.ctr)}`}</span>
-            : <span className="font-bold text-danger">0 leads</span>}
+            : <span className="font-bold text-slate-400">sin contactos</span>}
         </div>
         {tone === 'good' && ad.leads > 0
           ? <p className="text-[10px] text-slate-400">CPL {formatCurrency(ad.cpl)} · CTR {formatPercent(ad.ctr)}</p>
