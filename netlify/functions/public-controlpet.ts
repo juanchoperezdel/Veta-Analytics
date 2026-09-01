@@ -15,18 +15,19 @@ import { sql, corsHeaders, errorResponse } from './_db';
 
 const SLUG = 'controlpet';
 
-// ¿Se pueden mostrar las conversiones de Google como un RESULTADO? Hoy no.
-// Verificado contra la API el 26-08-2026 (desglose por conversion_action, 18-27 ago):
-//   Control Pet (web) page_view ....... 66 conversiones  [PAGE_VIEW, primary_for_goal=true]
-//   manual_event_SUBMIT_LEAD_FORM ......  0              [primary]
-//   Control Pet (web) whatsapp_click ...  0              [primary]
-//   Control Pet (web) form_start .......  0
-// O sea: el 100% de las "conversiones" son visitas a una página, y como page_view está
-// marcada como conversión primaria, PMax está pujando por visitas en lugar de contactos.
-// Mostrar ese 52/66 al lado de los leads de Meta haría creer que Google trae contactos
-// baratísimos. Hasta que se corrija la configuración, el bloque muestra inversión y
-// tráfico, sin etapa de conversión. Cuando se arregle: poner en true.
-const GOOGLE_CONVERSIONS_TRUSTED = false;
+// Hacia qué evento está optimizando Google HOY. Esto NO es un error de configuración:
+// es una decisión del equipo. Cuando todavía no hay volumen del evento final, se optimiza
+// hacia un evento intermedio para que el algoritmo junte señal y aprenda; una vez que
+// entran formularios con volumen, se pasa el objetivo a ese evento.
+// Verificado contra la API (desglose por conversion_action, ago-2026):
+//   Control Pet (web) page_view ....... 66  [PAGE_VIEW, primary_for_goal=true]  <- objetivo actual
+//   manual_event_SUBMIT_LEAD_FORM ......  0  [primary]                          <- destino
+//   Control Pet (web) whatsapp_click ...  0  [primary]
+// Consecuencia para el reporte: esas conversiones son VISITAS, no contactos. No se las
+// llama "conversiones" ni se las suma a los contactos de Meta (si no, parecería que
+// Google trae contactos 20 veces más baratos). Se muestran con su nombre real.
+// Cuando el objetivo pase al formulario: poner 'lead' y la etapa vuelve a ser contactos.
+const GOOGLE_OPTIMIZING_FOR: 'page_view' | 'lead' = 'page_view';
 
 // Campañas que viven en la cuenta pero NO las gestiona Veta. Vacío por ahora.
 const UNMANAGED_RE = /(?!)/; // no matchea nada
@@ -230,11 +231,9 @@ export default async (req: Request, _context: Context) => {
   const google = {
     hasData: gAgg.spend > 0,
     isPmax,
-    conversionsTrusted: GOOGLE_CONVERSIONS_TRUSTED,
+    optimizingFor: GOOGLE_OPTIMIZING_FOR,
     lastActiveDay: googleLastActiveDay,
     daysSinceActive: daysSinceGoogle,
-    // Qué está contando Google hoy (verificado por conversion_action, ver constante arriba)
-    conversionsAre: 'page_view',
     ...buildFunnel(gAgg),
     campaigns: gRows.map((r: any) => {
       const spend = Number(r.spend), leads = Number(r.leads);
@@ -350,10 +349,11 @@ export default async (req: Request, _context: Context) => {
     });
   }
 
-  // 6) Estado de la medición en Google
-  if (google.hasData && !GOOGLE_CONVERSIONS_TRUSTED) notes.push({
-    tone: 'warn',
-    text: `Google registró ${money(gAgg.spend)} de inversión, pero lo que hoy cuenta como conversión son visitas a una página, no contactos. Hasta corregir esa medición, los contactos que se ven acá son los de Meta.`,
+  // 6) En qué etapa está Google. Es una decisión del equipo, no un problema: se explica
+  // para que se entienda por qué el número de Google no son contactos.
+  if (google.hasData && GOOGLE_OPTIMIZING_FOR === 'page_view') notes.push({
+    tone: 'info',
+    text: `Google está en etapa de aprendizaje: por ahora se lo hace optimizar hacia visitas a la página, que es lo que le da señal suficiente para entender a quién mostrarle los avisos. Cuando el volumen de formularios lo permita, se pasa el objetivo a los contactos. Por eso los contactos de este reporte son los de Meta.`,
   });
 
   // ─── Demografía (Meta, top por gasto) ────────────────────────────────────────

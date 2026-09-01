@@ -31,7 +31,7 @@ type DailyPoint = { date: string; spend: number; impressions: number; clicks: nu
 type Campaign = { name: string; zone: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number };
 type Note = { tone: 'good' | 'warn' | 'info'; text: string };
 type Demo = { value: string; spend: number; leads: number; cpl: number; ctr: number };
-type GoogleData = Funnel & { hasData: boolean; isPmax: boolean; conversionsTrusted: boolean; conversionsAre: string; lastActiveDay: string | null; daysSinceActive: number | null; campaigns: { name: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
+type GoogleData = Funnel & { hasData: boolean; isPmax: boolean; optimizingFor: 'page_view' | 'lead'; lastActiveDay: string | null; daysSinceActive: number | null; campaigns: { name: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
 type Data = {
   config: { name: string; currency: string; period: { start: string; end: string }; firstDataDate: string | null; generatedAt: string; dataUpdatedAt: string | null; metaUpdatedAt: string | null; googleUpdatedAt: string | null };
   overall: Funnel;
@@ -246,30 +246,23 @@ export default function ControlPetPublic() {
 
         {/* ── Google ── */}
         <section>
-          <SectionTitle icon={<MousePointerClick size={15} />} title="Google Ads" hint="Performance Max" />
+          <SectionTitle icon={<MousePointerClick size={15} />} title="Google Ads" hint="Performance Max · en etapa de aprendizaje" />
           {google.hasData ? (
             <Card className="p-5 space-y-4">
-              {!google.conversionsTrusted ? (
-                <div className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed">
-                  <p className="font-semibold mb-1">⚠ La medición de Google está mal configurada — por eso acá no hay contactos verificados.</p>
-                  <p>
-                    Revisamos qué está contando Google como conversión y hoy el 100% son <span className="font-semibold">visitas a una página</span>.
-                    Los eventos que sí importan — <span className="font-semibold">envío de formulario</span> y <span className="font-semibold">click a WhatsApp</span> — están en cero.
-                    Además la visita figura como objetivo principal de la campaña, así que Google está comprando visitas en lugar de contactos.
-                    Ya estamos corrigiéndolo: mientras tanto este bloque muestra <span className="font-semibold">inversión y tráfico</span>, y los contactos del reporte son los de Meta.
-                  </p>
-                </div>
-              ) : google.isPmax && (
-                <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  ⚠ <span className="font-semibold">Performance Max</span> cuenta en un mismo número acciones de distinto valor, así que sus conversiones no son directamente comparables con los contactos de Meta.
+              {google.optimizingFor === 'page_view' && (
+                <p className="text-[12px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 leading-relaxed">
+                  Esta campaña está en <span className="font-semibold text-slate-700">etapa de aprendizaje</span>: hoy el objetivo que se le da a Google
+                  son las <span className="font-semibold text-slate-700">visitas a la página</span>, que es lo que le da señal suficiente para entender a quién
+                  mostrarle los avisos. Por eso lo que se mide acá abajo son visitas y no contactos. Cuando el volumen de formularios lo permita,
+                  se pasa el objetivo a los contactos.
                 </p>
               )}
-              <FunnelView f={google} leadLabel={google.conversionsTrusted ? 'Conversiones' : undefined} hideLeads={!google.conversionsTrusted} />
+              <FunnelView f={google} leadLabel={google.optimizingFor === 'page_view' ? 'Visitas a la página' : 'Contactos'} />
               <div className="border-t border-slate-100 pt-3">
                 {google.campaigns.slice(0, 8).map(c => (
                   <div key={c.name} className="flex items-center justify-between py-1.5 text-sm border-b border-slate-50 last:border-0">
                     <span className="truncate font-medium" title={c.name}>{c.name}</span>
-                    <span className="text-slate-400 tabular-nums">{formatCurrency(c.spend)} · {formatNumber(c.clicks)} clicks</span>
+                    <span className="text-slate-400 tabular-nums">{formatCurrency(c.spend)} · {formatNumber(c.clicks)} clicks · {formatNumber(c.leads)} {google.optimizingFor === 'page_view' ? 'visitas' : 'contactos'}</span>
                   </div>
                 ))}
               </div>
