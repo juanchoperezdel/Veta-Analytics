@@ -2,6 +2,7 @@ import { useEffect, useState, Fragment, type ReactNode } from 'react';
 import {
   TrendingDown, Target, Trophy, AlertTriangle, Users, Loader2,
   Eye, MousePointerClick, MapPin, ExternalLink, LineChart as LineChartIcon,
+  TrendingUp, Info, ClipboardList,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Card } from '@/components/ui/Card';
@@ -28,11 +29,13 @@ type Ad = { adId: string; adName: string; campaignName?: string; zone?: string; 
 type Zone = Funnel & { name: string; adCount: number; ads: Ad[] };
 type DailyPoint = { date: string; spend: number; impressions: number; clicks: number; leads: number; cpl: number; partial: boolean };
 type Campaign = { name: string; zone: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number };
+type Note = { tone: 'good' | 'warn' | 'info'; text: string };
 type Demo = { value: string; spend: number; leads: number; cpl: number; ctr: number };
-type GoogleData = Funnel & { hasData: boolean; isPmax: boolean; campaigns: { name: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
+type GoogleData = Funnel & { hasData: boolean; isPmax: boolean; conversionsTrusted: boolean; conversionsAre: string; lastActiveDay: string | null; daysSinceActive: number | null; campaigns: { name: string; spend: number; clicks: number; impressions: number; leads: number; cpl: number }[] };
 type Data = {
   config: { name: string; currency: string; period: { start: string; end: string }; firstDataDate: string | null; generatedAt: string; dataUpdatedAt: string | null; metaUpdatedAt: string | null; googleUpdatedAt: string | null };
   overall: Funnel;
+  notes: Note[];
   daily: DailyPoint[];
   zones: Zone[];
   campaigns: Campaign[];
@@ -97,7 +100,7 @@ export default function ControlPetPublic() {
   if (loading && !data) return <Status icon={<Loader2 className="animate-spin" />} title="Cargando el reporte de ControlPet…" />;
   if (error || !data) return <Status icon={<AlertTriangle />} title="No pudimos cargar el reporte" subtitle={error ?? ''} isError />;
 
-  const { overall, daily, zones, campaigns, ads, google, demographics, config } = data;
+  const { overall, notes, daily, zones, campaigns, ads, google, demographics, config } = data;
   const metaSpend = overall.spend;
   const googleSpend = google.hasData ? google.spend : 0;
   const totalSpend = metaSpend + googleSpend;
@@ -151,6 +154,16 @@ export default function ControlPetPublic() {
             Acá el formulario se completa <b>dentro de Meta</b>: el contacto no pasa por la web.
           </p>
         </section>
+
+        {/* ── Lectura del período ── */}
+        {notes.length > 0 && (
+          <section>
+            <SectionTitle icon={<ClipboardList size={15} />} title="Qué está pasando" hint="Lo que dicen los números de este período" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {notes.map((n, i) => <Fragment key={i}><NoteCard note={n} /></Fragment>)}
+            </div>
+          </section>
+        )}
 
         {/* ── Embudo general ── */}
         <section>
@@ -235,21 +248,27 @@ export default function ControlPetPublic() {
           <SectionTitle icon={<MousePointerClick size={15} />} title="Google Ads" hint="Performance Max" />
           {google.hasData ? (
             <Card className="p-5 space-y-4">
-              {google.leads === 0 ? (
-                <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  ⚠ <span className="font-semibold">Sección en revisión.</span> Hay inversión y clicks, pero Google no está registrando conversiones en el período. Estamos validando si es un tema de <span className="font-semibold">medición (tracking)</span> o de <span className="font-semibold">volumen</span>. Por ahora tomá estos números como inversión y tráfico, no como resultados finales.
-                </p>
+              {!google.conversionsTrusted ? (
+                <div className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed">
+                  <p className="font-semibold mb-1">⚠ La medición de Google está mal configurada — por eso acá no hay contactos verificados.</p>
+                  <p>
+                    Revisamos qué está contando Google como conversión y hoy el 100% son <span className="font-semibold">visitas a una página</span>.
+                    Los eventos que sí importan — <span className="font-semibold">envío de formulario</span> y <span className="font-semibold">click a WhatsApp</span> — están en cero.
+                    Además la visita figura como objetivo principal de la campaña, así que Google está comprando visitas en lugar de contactos.
+                    Ya estamos corrigiéndolo: mientras tanto este bloque muestra <span className="font-semibold">inversión y tráfico</span>, y los contactos del reporte son los de Meta.
+                  </p>
+                </div>
               ) : google.isPmax && (
                 <p className="text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  ⚠ <span className="font-semibold">Las conversiones de Google no son comparables con los leads de Meta.</span> Esta es una campaña <span className="font-semibold">Performance Max</span>, que cuenta en un mismo número acciones de distinto valor (formularios, clicks a WhatsApp, visitas a páginas clave). Estamos revisando la medición para poder separarlas; hasta entonces, mirá este bloque como <span className="font-semibold">inversión y tráfico</span>, no como leads comerciales.
+                  ⚠ <span className="font-semibold">Performance Max</span> cuenta en un mismo número acciones de distinto valor, así que sus conversiones no son directamente comparables con los contactos de Meta.
                 </p>
               )}
-              <FunnelView f={google} leadLabel="Conversiones" />
+              <FunnelView f={google} leadLabel={google.conversionsTrusted ? 'Conversiones' : undefined} hideLeads={!google.conversionsTrusted} />
               <div className="border-t border-slate-100 pt-3">
                 {google.campaigns.slice(0, 8).map(c => (
                   <div key={c.name} className="flex items-center justify-between py-1.5 text-sm border-b border-slate-50 last:border-0">
                     <span className="truncate font-medium" title={c.name}>{c.name}</span>
-                    <span className="text-slate-400 tabular-nums">{formatCurrency(c.spend)} · {formatNumber(c.leads)} conv.</span>
+                    <span className="text-slate-400 tabular-nums">{formatCurrency(c.spend)} · {formatNumber(c.clicks)} clicks</span>
                   </div>
                 ))}
               </div>
@@ -288,11 +307,13 @@ export default function ControlPetPublic() {
 // ─── Funnel ────────────────────────────────────────────────────────────────────
 // Tres etapas: Impresiones → Clicks → Leads. No hay "visitas a la landing" porque el
 // formulario se completa dentro de Meta.
-function FunnelView({ f, leadLabel }: { f: Funnel; leadLabel?: string }) {
+function FunnelView({ f, leadLabel, hideLeads }: { f: Funnel; leadLabel?: string; hideLeads?: boolean }) {
   const stages = [
     { key: 'impr', label: 'Impresiones', icon: <Eye size={14} />, value: f.impressions, rate: null as number | null, cost: f.cpm, costLabel: 'CPM' },
     { key: 'clk', label: 'Clicks', icon: <MousePointerClick size={14} />, value: f.clicks, rate: f.clickRate, cost: f.cpc, costLabel: 'CPC' },
-    { key: 'lead', label: leadLabel ?? 'Leads', icon: <Target size={14} />, value: f.leads, rate: f.leadRate, cost: f.cpl, costLabel: leadLabel ? 'Costo' : 'CPL' },
+    // hideLeads: la etapa se omite cuando el número existe pero no es confiable (ver
+    // GOOGLE_CONVERSIONS_TRUSTED en el endpoint). Mejor no mostrarlo que mostrarlo mal.
+    ...(hideLeads ? [] : [{ key: 'lead', label: leadLabel ?? 'Leads', icon: <Target size={14} />, value: f.leads, rate: f.leadRate, cost: f.cpl, costLabel: leadLabel ? 'Costo' : 'CPL' }]),
   ];
   const max = Math.max(f.impressions, 1);
   return (
@@ -324,6 +345,23 @@ function FunnelView({ f, leadLabel }: { f: Funnel; leadLabel?: string }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ─── Lectura del período ──────────────────────────────────────────────
+// El tono NUNCA va solo por color: cada tarjeta lleva su icono, para que se entienda
+// impresa en blanco y negro y para quien no distingue verde de ámbar.
+function NoteCard({ note }: { note: Note }) {
+  const cfg = {
+    good: { icon: <TrendingUp size={15} />, ring: 'border-emerald-200 bg-emerald-50/60', ink: 'text-emerald-700' },
+    warn: { icon: <AlertTriangle size={15} />, ring: 'border-amber-200 bg-amber-50/60', ink: 'text-amber-700' },
+    info: { icon: <Info size={15} />, ring: 'border-slate-200 bg-white', ink: 'text-slate-500' },
+  }[note.tone];
+  return (
+    <div className={cn('rounded-xl border p-3.5 flex items-start gap-2.5', cfg.ring)}>
+      <span className={cn('shrink-0 mt-0.5', cfg.ink)}>{cfg.icon}</span>
+      <p className="text-[13px] leading-relaxed text-slate-700">{note.text}</p>
     </div>
   );
 }

@@ -15,6 +15,19 @@ import { sql, corsHeaders, errorResponse } from './_db';
 
 const SLUG = 'controlpet';
 
+// ¿Se pueden mostrar las conversiones de Google como un RESULTADO? Hoy no.
+// Verificado contra la API el 26-08-2026 (desglose por conversion_action, 18-27 ago):
+//   Control Pet (web) page_view ....... 66 conversiones  [PAGE_VIEW, primary_for_goal=true]
+//   manual_event_SUBMIT_LEAD_FORM ......  0              [primary]
+//   Control Pet (web) whatsapp_click ...  0              [primary]
+//   Control Pet (web) form_start .......  0
+// O sea: el 100% de las "conversiones" son visitas a una página, y como page_view está
+// marcada como conversión primaria, PMax está pujando por visitas en lugar de contactos.
+// Mostrar ese 52/66 al lado de los leads de Meta haría creer que Google trae contactos
+// baratísimos. Hasta que se corrija la configuración, el bloque muestra inversión y
+// tráfico, sin etapa de conversión. Cuando se arregle: poner en true.
+const GOOGLE_CONVERSIONS_TRUSTED = false;
+
 // Campañas que viven en la cuenta pero NO las gestiona Veta. Vacío por ahora.
 const UNMANAGED_RE = /(?!)/; // no matchea nada
 function isManaged(name: string): boolean { return !UNMANAGED_RE.test(name || ''); }
@@ -201,18 +214,118 @@ export default async (req: Request, _context: Context) => {
     GROUP BY name ORDER BY SUM(spend) DESC`;
   const gAgg = emptyAgg();
   for (const r of gRows) addAgg(gAgg, { spend: Number(r.spend), impressions: Number(r.impressions), clicks: Number(r.clicks), leads: Number(r.leads), reach: 0 });
+
+  // Ultimo dia en que Google efectivamente gasto. Si quedo viejo, la campana dejo de
+  // entregar aunque figure activa: hay que decirlo, no mostrar un total congelado.
+  const [gLast] = await sql`
+    SELECT MAX(snapshot_date)::text d FROM google_ads_campaigns
+    WHERE client_id = ${cid} AND spend > 0`;
+  const googleLastActiveDay: string | null = gLast?.d ?? null;
+  const daysSinceGoogle = googleLastActiveDay
+    ? Math.round((Date.parse(end) - Date.parse(googleLastActiveDay)) / 86400000)
+    : null;
   // isPmax: PMax mezcla tipos de conversión (formulario, llamada, visita, etc.) en un solo
   // número. El front lo usa para avisar que NO es comparable con los leads de Meta.
   const isPmax = gRows.some((r: any) => /pmax|performance\s*max/i.test(r.name ?? ''));
   const google = {
     hasData: gAgg.spend > 0,
     isPmax,
+    conversionsTrusted: GOOGLE_CONVERSIONS_TRUSTED,
+    lastActiveDay: googleLastActiveDay,
+    daysSinceActive: daysSinceGoogle,
+    // Qué está contando Google hoy (verificado por conversion_action, ver constante arriba)
+    conversionsAre: 'page_view',
     ...buildFunnel(gAgg),
     campaigns: gRows.map((r: any) => {
       const spend = Number(r.spend), leads = Number(r.leads);
       return { name: r.name, spend, clicks: Number(r.clicks), impressions: Number(r.impressions), leads, cpl: leads > 0 ? spend / leads : 0 };
     }),
   };
+
+  // ─── Lectura del período ─────────────────────────────────────────────────────
+  // Los hechos que un analista señalaría, calculados sobre la data del período. No hay
+  // texto inventado: cada frase sale de un número de arriba. Si un caso no aplica
+  // (una sola zona, sin leads, etc.) la línea simplemente no se emite.
+  type Note = { tone: 'good' | 'warn' | 'info'; text: string };
+  const notes: Note[] = [];
+  const money = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
+  const pct = (n: number) => (n * 100).toFixed(n < 0.1 ? 1 : 0).replace('.', ',') + '%';
+
+  // 1) Concentración y rendimiento por zona
+  const zonesByLeads = [...zones].filter(z => z.spend > 0).sort((a, b) => b.leads - a.leads);
+  if (zonesByLeads.length >= 2 && overall.leads > 0) {
+    const top = zonesByLeads[0];
+    const rest = zonesByLeads.slice(1);
+    const worst = [...rest].sort((a, b) => b.spend - a.spend)[0];
+    notes.push({
+      tone: 'info',
+      text: `${top.name} concentra ${pct(top.spend / overall.spend)} de la inversión y ${pct(top.leads / overall.leads)} de los contactos.`,
+    });
+    if (top.cpl > 0 && worst.cpl > 0) {
+      const ratio = worst.cpl / top.cpl;
+      if (ratio >= 1.3) notes.push({
+        tone: 'good',
+        text: `Cada contacto de ${top.name} sale ${money(top.cpl)} y uno de ${worst.name} ${money(worst.cpl)}: ${ratio.toFixed(1).replace('.', ',')} veces más caro. La plata rinde mejor en ${top.name}.`,
+      });
+    } else if (worst.leads === 0 && worst.spend > 0) {
+      notes.push({
+        tone: 'warn',
+        text: `${worst.name} lleva ${money(worst.spend)} invertidos y todavía no trajo ningún contacto.`,
+      });
+    }
+  }
+
+  // 2) Cuánto depende el resultado de un solo aviso
+  if (best.length > 0 && overall.leads > 0) {
+    const star = best[0];
+    if (star.leads / overall.leads >= 0.4) notes.push({
+      tone: 'info',
+      text: `Un solo aviso ("${star.adName}" de ${star.zone}) trajo ${star.leads} de los ${overall.leads} contactos, a ${money(star.cpl)} cada uno. Es el que está sosteniendo la campaña.`,
+    });
+  }
+
+  // 3) Plata en avisos que no devuelven
+  const deadSpend = leadgenAds.filter(a => a.leads === 0).reduce((acc, a) => acc + a.spend, 0);
+  if (deadSpend > 0 && overall.spend > 0 && deadSpend / overall.spend >= 0.03) {
+    const n = leadgenAds.filter(a => a.leads === 0).length;
+    notes.push({
+      tone: 'warn',
+      text: `${n} aviso${n > 1 ? 's' : ''} se llev${n > 1 ? 'aron' : 'ó'} ${money(deadSpend)} (${pct(deadSpend / overall.spend)} de la inversión) sin traer contactos. Es lo primero para revisar o pausar.`,
+    });
+  }
+
+  // 4) Tendencia: primera mitad vs segunda mitad del período (excluyendo el día en curso)
+  const closed = daily.filter(d => !d.partial);
+  if (closed.length >= 4) {
+    const mid = Math.floor(closed.length / 2);
+    const sum = (arr: typeof closed, k: 'spend' | 'leads') => arr.reduce((a, x) => a + x[k], 0);
+    const l1 = sum(closed.slice(0, mid), 'leads'), l2 = sum(closed.slice(mid), 'leads');
+    const s1 = sum(closed.slice(0, mid), 'spend'), s2 = sum(closed.slice(mid), 'spend');
+    const cpl1 = l1 > 0 ? s1 / l1 : 0, cpl2 = l2 > 0 ? s2 / l2 : 0;
+    if (l2 > l1) notes.push({
+      tone: 'good',
+      text: `Los contactos vienen en alza: ${l1} en los primeros ${mid} días y ${l2} en los últimos ${closed.length - mid}.`,
+    });
+    if (cpl1 > 0 && cpl2 > 0 && cpl2 < cpl1 * 0.85) notes.push({
+      tone: 'good',
+      text: `El costo por contacto bajó de ${money(cpl1)} a ${money(cpl2)} en la segunda mitad del período.`,
+    });
+  }
+
+  // 5) Google dejo de entregar
+  if (googleLastActiveDay && daysSinceGoogle !== null && daysSinceGoogle >= 2) {
+    const [, m, d] = googleLastActiveDay.split('-');
+    notes.push({
+      tone: 'warn',
+      text: `Google no muestra avisos desde el ${d}/${m}: lleva ${daysSinceGoogle} días sin gastar aunque la campaña figura activa. Lo estamos revisando con Google.`,
+    });
+  }
+
+  // 6) Estado de la medición en Google
+  if (google.hasData && !GOOGLE_CONVERSIONS_TRUSTED) notes.push({
+    tone: 'warn',
+    text: `Google registró ${money(gAgg.spend)} de inversión, pero lo que hoy cuenta como conversión son visitas a una página, no contactos. Hasta corregir esa medición, los contactos que se ven acá son los de Meta.`,
+  });
 
   // ─── Demografía (Meta, top por gasto) ────────────────────────────────────────
   const demoRows = await sql`
@@ -259,6 +372,7 @@ export default async (req: Request, _context: Context) => {
       googleUpdatedAt: gUpd?.s ?? null,
     },
     overall,
+    notes,
     daily,
     zones,
     campaigns,
