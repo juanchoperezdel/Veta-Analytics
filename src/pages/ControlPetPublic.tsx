@@ -47,6 +47,8 @@ type Data = {
 
 const DEMO_LABELS: Record<string, string> = { age: 'Edad', gender: 'Género', region: 'Región', publisher_platform: 'Placement' };
 const GENDER_ES: Record<string, string> = { male: 'Hombres', female: 'Mujeres', unknown: 'Sin dato' };
+// Meta manda 'Unknown' en el breakdown de edad cuando no la conoce.
+const AGE_ES: Record<string, string> = { Unknown: 'Sin dato', unknown: 'Sin dato' };
 // Meta devuelve los placements en minuscula ('instagram') -> se muestran con el nombre real.
 const PLACEMENT_ES: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook', messenger: 'Messenger', audience_network: 'Audience Network', threads: 'Threads', whatsapp: 'WhatsApp' };
 // Color de los graficos: turquesa de ControlPet, un paso mas saturado para que pase
@@ -283,7 +285,7 @@ export default function ControlPetPublic() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {(['age', 'gender', 'region', 'publisher_platform'] as const).map(dim =>
                 (demographics[dim] ?? []).length
-                  ? <Fragment key={dim}><DemoCard title={DEMO_LABELS[dim]} items={demographics[dim]} labels={dim === 'gender' ? GENDER_ES : dim === 'publisher_platform' ? PLACEMENT_ES : undefined} /></Fragment>
+                  ? <Fragment key={dim}><DemoCard title={DEMO_LABELS[dim]} items={demographics[dim]} labels={dim === 'gender' ? GENDER_ES : dim === 'publisher_platform' ? PLACEMENT_ES : dim === 'age' ? AGE_ES : undefined} /></Fragment>
                   : null
               )}
             </div>
