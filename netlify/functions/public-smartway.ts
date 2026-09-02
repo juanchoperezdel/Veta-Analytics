@@ -24,6 +24,25 @@ const SLUG = 'smartway';
 const UNMANAGED_RE = /novaz/i;
 function isManaged(name: string): boolean { return !UNMANAGED_RE.test(name || ''); }
 
+// ─── Que se muestra en "Que esta pasando" ────────────────────────────────────
+// El panel de lectura es lo primero que lee el cliente, asi que cada linea que entra
+// pesa. Reglas que aplicamos:
+//   · Va lo que el cliente puede ACCIONAR o necesita para decidir sobre su presupuesto.
+//   · NO va la metodologia interna (por que separamos el trafico del CPM, por que el
+//     webinar no entra al promedio): eso ya esta rotulado en cada seccion.
+//   · NO va nada que sea un tema NUESTRO en curso (el seguimiento de Google): eso vive
+//     en la seccion de Google, dicho como lo que estamos haciendo, no como una alarma.
+//   · El ambar se reserva para lo que exige una decision del cliente. Que un rubro
+//     todavia este testeando NO es ambar.
+// Poner en false para dejar de emitir esa familia de senales.
+const SHOW_NOTES = {
+  resultado: true,   // leads del periodo y su costo
+  rubros:    true,   // que rubro rinde mejor / cual sigue en ajuste
+  caminos:   true,   // formulario vs sitio
+  webinar:   true,   // registros de Orbatix
+  cobertura: true,   // aviso si una seccion no cubre todo el periodo
+};
+
 // Fechas en JS (string ISO) — evita la aritmética de fechas con parámetros en Neon.
 function iso(d: Date) { return d.toISOString().split('T')[0]; }
 function todayISO() { return iso(new Date()); }
@@ -340,69 +359,85 @@ export default async (req: Request, _context: Context) => {
   type Note = { tone: 'good' | 'warn' | 'info'; text: string };
   const notes: Note[] = [];
   const money = (n: number) => '$' + Math.round(n).toLocaleString('es-AR');
-  const pct = (n: number) => (n * 100).toFixed(n < 0.1 ? 1 : 0).replace('.', ',') + '%';
   const spendGoogle = gAgg.spend;
   const spendTotal = metaSpendTotal + spendGoogle;
+  const on = (k: keyof typeof SHOW_NOTES) => SHOW_NOTES[k];
 
-  if (overall.leads > 0) {
-    notes.push({ tone: 'info', text: `En el período entraron ${overall.leads} lead${overall.leads === 1 ? '' : 's'} comercial${overall.leads === 1 ? '' : 'es'} a ${money(overall.cpl)} cada uno. Contando también lo invertido en Google, que todavía no reporta conversiones, cada lead sale ${money(spendTotal / overall.leads)}.` });
-  } else if (overall.spend > 0) {
-    notes.push({ tone: 'warn', text: `En el período se invirtieron ${money(overall.spend)} en lead-gen y todavía no entró ningún lead.` });
+  // Resultado del período. El CPL titular es el de Meta, que es donde entran los leads.
+  // El costo sobre la inversión total (incluyendo Google) sigue disponible arriba en los
+  // KPIs; acá no se remata con él porque en el panel de lectura suena a autocrítica y no
+  // a información.
+  if (on('resultado')) {
+    if (overall.leads > 0) {
+      notes.push({ tone: 'info', text: `En el período entraron ${overall.leads} lead${overall.leads === 1 ? '' : 's'} comercial${overall.leads === 1 ? '' : 'es'} a ${money(overall.cpl)} cada uno.` });
+    } else if (overall.spend > 0) {
+      notes.push({ tone: 'warn', text: `En el período se invirtieron ${money(overall.spend)} en lead-gen y todavía no entró ningún lead.` });
+    }
   }
 
-  // Rubro que mejor y peor rinde
-  const vertsWithLeads = verticals.filter(v => v.leads > 0).sort((a, b) => a.cpl - b.cpl);
-  if (vertsWithLeads.length >= 2) {
-    const top = vertsWithLeads[0], bottom = vertsWithLeads[vertsWithLeads.length - 1];
-    if (bottom.cpl / top.cpl >= 1.3) notes.push({
-      tone: 'good',
-      text: `${top.name} es el rubro más eficiente: cada lead sale ${money(top.cpl)} contra ${money(bottom.cpl)} en ${bottom.name}. Ahí conviene apoyar el presupuesto.`,
-    });
-  }
-  const vertNoLeads = verticals.filter(v => v.leads === 0 && v.spend >= SPEND_FLOOR).sort((a, b) => b.spend - a.spend)[0];
-  if (vertNoLeads) notes.push({
-    tone: 'warn',
-    text: `${vertNoLeads.name} lleva ${money(vertNoLeads.spend)} invertidos en el período sin ningún lead.`,
-  });
-
-  // Formulario vs landing. Las visitas a la landing ya no estan en el embudo general
-  // (ver forceNoVisits), asi que se cuentan aca.
-  const f = channels.form, l = channels.landing;
-  if (f.spend > 0 && l.spend > 0) {
-    if (f.leads > 0 && l.leads === 0) notes.push({
+  // Rubro que mejor rinde → dónde apoyar el presupuesto. Es la señal más accionable
+  // del panel y la única que además es una buena noticia.
+  if (on('rubros')) {
+    const vertsWithLeads = verticals.filter(v => v.leads > 0).sort((a, b) => a.cpl - b.cpl);
+    if (vertsWithLeads.length >= 2) {
+      const top = vertsWithLeads[0], bottom = vertsWithLeads[vertsWithLeads.length - 1];
+      if (bottom.cpl / top.cpl >= 1.3) notes.push({
+        tone: 'good',
+        text: `${top.name} es el rubro más eficiente: cada lead sale ${money(top.cpl)} contra ${money(bottom.cpl)} en ${bottom.name}. Ahí conviene apoyar el presupuesto.`,
+      });
+    }
+    // Rubro sin leads. OJO CON EL TONO: que un rubro todavía no convierta mientras se
+    // testea es normal, no una falla — se emite como dato, y solo cuando el peso es
+    // grande de verdad (>25% del presupuesto de lead-gen), no ante cualquier monto.
+    const vertNoLeads = verticals
+      .filter(v => v.leads === 0 && overall.spend > 0 && v.spend / overall.spend >= 0.25)
+      .sort((a, b) => b.spend - a.spend)[0];
+    if (vertNoLeads) notes.push({
       tone: 'info',
-      text: `Los leads están entrando por el formulario de Meta (${f.leads} lead${f.leads === 1 ? '' : 's'}), no por la landing: las campañas al sitio llevaron ${l.visits} visita${l.visits === 1 ? '' : 's'} con ${money(l.spend)} y ninguna terminó en lead. El cuello ahí está en la landing, no en el anuncio.`,
-    });
-    else if (f.cpl > 0 && l.cpl > 0) notes.push({
-      tone: 'info',
-      text: `El formulario de Meta trae leads a ${money(f.cpl)} y la landing a ${money(l.cpl)}.`,
+      text: `${vertNoLeads.name} todavía no convirtió en el período: se lleva ${money(vertNoLeads.spend)} de la inversión y es donde estamos ajustando mensaje y segmentación.`,
     });
   }
 
-  // Tráfico separado — explicar por qué no está en el promedio
-  if (traffic && traffic.spend > 0) notes.push({
-    tone: 'info',
-    text: `${money(traffic.spend)} fueron a campañas de tráfico y alcance, que no buscan leads. Se miden aparte: son avisos muy baratos por impresión y, mezclados, abaratarían artificialmente el costo por mil y el CTR de todo el lead-gen.`,
+  // Formulario vs landing. El hecho es el mismo, pero el sujeto de la frase es la
+  // DECISIÓN que tomamos, no el número que falló: el cliente necesita saber dónde está
+  // yendo su presupuesto y por qué, no leer un diagnóstico sobre su sitio.
+  if (on('caminos')) {
+    const f = channels.form, l = channels.landing;
+    if (f.spend > 0 && l.spend > 0) {
+      if (f.leads > 0 && l.leads === 0) notes.push({
+        tone: 'info',
+        text: `El formulario nativo de Meta está rindiendo mejor que enviar al sitio: los ${f.leads} lead${f.leads === 1 ? '' : 's'} del período entraron por ahí. Estamos concentrando el presupuesto en ese camino y revisando la conversión del sitio con las ${l.visits} visita${l.visits === 1 ? '' : 's'} que ya llevamos.`,
+      });
+      else if (f.cpl > 0 && l.cpl > 0) notes.push({
+        tone: 'info',
+        text: `El formulario de Meta trae leads a ${money(f.cpl)} y la landing a ${money(l.cpl)}.`,
+      });
+    }
+  }
+
+  // Webinar: es una buena noticia y explica por qué va aparte.
+  if (on('webinar') && webinar && webinar.leads > 0) notes.push({
+    tone: 'good',
+    text: `El webinar Orbatix trajo ${webinar.leads} registro${webinar.leads === 1 ? '' : 's'} a ${money(webinar.cpl)}. Se miden aparte de los leads comerciales porque un registro a un evento es mucho más accesible.`,
   });
 
-  // Webinar separado
-  if (webinar && webinar.leads > 0) notes.push({
-    tone: 'info',
-    text: `El webinar Orbatix trajo ${webinar.leads} registro${webinar.leads === 1 ? '' : 's'} a ${money(webinar.cpl)}. Son registros a un evento, mucho más baratos que un lead comercial: van aparte para no distorsionar el CPL.`,
-  });
+  // Google: por qué NO aparece acá. La inversión de Google está a la vista en los KPIs y
+  // el estado del seguimiento se explica en su propia sección, en clave de qué estamos
+  // haciendo. Repetirlo en el panel de lectura lo convertía en la alarma más grande de
+  // la página, y es un tema de medición nuestro, no un resultado del período.
+  //
+  // Tráfico y alcance: idem. Tiene su propia sección con el rótulo de que no busca leads.
+  // Explicar acá la metodología de por qué se excluye del CPM es conversación interna.
 
-  // Google sin conversiones
-  if (google.hasData && google.conversions === 0) notes.push({
-    tone: 'warn',
-    text: `Google invirtió ${money(spendGoogle)} y no está reportando conversiones. Es un tema de medición — el seguimiento no está enviando los eventos —, no necesariamente de resultado: los clics existen y están llegando al sitio.`,
-  });
-
-  // Aviso de cobertura de la demografía
-  const regionCov = demoCoverage['region'];
-  if (regionCov && regionCov.coverage < 0.9) notes.push({
-    tone: 'info',
-    text: `La apertura por provincia cubre ${pct(regionCov.coverage)} de la inversión del período (llega hasta el ${regionCov.lastDay ?? '—'}). El resto de las secciones sí cubre el período completo.`,
-  });
+  // Cobertura de la demografía: solo si el hueco es grande. Es un dato de lectura del
+  // reporte, no un problema de la cuenta.
+  if (on('cobertura')) {
+    const regionCov = demoCoverage['region'];
+    if (regionCov && regionCov.coverage < 0.75) notes.push({
+      tone: 'info',
+      text: `La apertura por provincia cubre ${Math.round(regionCov.coverage * 100)}% de la inversión del período (llega hasta el ${regionCov.lastDay ?? '—'}). El resto de las secciones cubre el período completo.`,
+    });
+  }
 
   // ─── Frescura y cobertura ───────────────────────────────────────────────────
   const [upd] = await sql`

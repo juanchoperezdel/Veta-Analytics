@@ -371,17 +371,23 @@ export default function SmartwayPublic() {
                 <Stat label="Costo por clic" value={formatCurrency(google.cpc)} />
               </div>
 
+              {/* Estado del seguimiento de Google. Va en gris informativo, no en ámbar de
+                  alarma: es una tarea nuestra en curso, no una decisión que el cliente
+                  tenga que tomar. Y se cuenta por lo que estamos haciendo, no por lo que
+                  falta. Lo que NO se hace es ocultarlo: la inversión de Google está a la
+                  vista en los KPIs y en la factura del cliente, así que un reporte que la
+                  muestre sin explicar por qué no tiene leads al lado se lee peor. */}
               {google.conversions === 0 && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3.5 flex items-start gap-2.5 mb-4">
-                  <AlertTriangle size={15} className="text-amber-700 shrink-0 mt-0.5" />
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 flex items-start gap-2.5 mb-4">
+                  <Info size={15} className="text-slate-500 shrink-0 mt-0.5" />
                   <p className="text-[13px] leading-relaxed text-slate-700">
-                    <span className="font-bold">La medición de Google no está enviando conversiones.</span>{' '}
-                    La inversión y los clics de arriba son reales y están llegando al sitio, pero no podemos atribuirle
-                    leads a estas campañas hasta que se corrija el seguimiento.
+                    <span className="font-bold">Los leads de Google todavía no se pueden atribuir por campaña.</span>{' '}
+                    El seguimiento del sitio no está devolviendo los eventos a Google, así que estas campañas se
+                    reportan por inversión y tráfico. <span className="font-semibold">Estamos trabajando en dejarlo
+                    midiendo</span>; mientras tanto, los leads del reporte son los de Meta.
                     {google.allConversions > 0 && (
-                      <> Google registra {formatNumber(Math.round(google.allConversions))} acciones secundarias en el período
-                      (vistas de página, clics de teléfono): <span className="font-semibold">no son leads</span> y por eso no
-                      se muestran como resultado.</>
+                      <> Google sí registra {formatNumber(Math.round(google.allConversions))} acciones secundarias
+                      (vistas de página, clics de teléfono), que no contamos como leads para no inflar el resultado.</>
                     )}
                   </p>
                 </div>
