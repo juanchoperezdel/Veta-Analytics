@@ -59,7 +59,7 @@ async function backfillMetaMonth(
       const objective = row.objective ?? null;
       const status    = statusByCampaign.get(row.campaign_id) ?? null;
       const spend     = parseFloat(row.spend ?? '0');
-      const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
+      const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;  // TODO: extractMetaConversions
       const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
       const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
       const roas      = spend > 0 ? revenue / spend : 0;
@@ -418,6 +418,15 @@ async function backfillGA4(clientId: string, propertyId: string) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // ⚠ DESACTUALIZADO — NO CORRER SIN ARREGLAR.
+  // Este script quedó en el modelo mono-cliente: usa META_AD_ACCOUNT_ID /
+  // GOOGLE_ADS_CUSTOMER_ID / GA4_PROPERTY_ID de las env vars para TODOS los clientes,
+  // así que escribiría la data de una cuenta bajo el client_id de las otras (es el bug
+  // que scripts/sync/index.ts ya documenta como arreglado). Para habilitarlo hay que
+  // leer los IDs de la fila del cliente, igual que index.ts.
+  if (process.env.BACKFILL_I_KNOW_ITS_BROKEN !== 'yes') {
+    throw new Error('backfill.ts está desactualizado (multi-cliente): contaminaría los datos de todos los clientes. Ver comentario en el código.');
+  }
   const clients = await sql`SELECT id, slug FROM clients`;
 
   for (const client of clients) {

@@ -212,6 +212,17 @@ ALTER TABLE meta_ads_creatives ADD COLUMN IF NOT EXISTS landing_page_view BIGINT
 -- link público al anuncio (permalink IG, o preview compartible de Meta) para abrirlo desde el dashboard
 ALTER TABLE meta_ads_creatives ADD COLUMN IF NOT EXISTS preview_link TEXT;
 
+-- link_clicks = clicks AL LINK. `clicks` de Meta incluye reacciones, comentarios y
+-- expandir imagen, asi que usarlo como numerador del funnel subestima la caida real
+-- click -> visita a la landing.
+ALTER TABLE meta_ads_creatives ADD COLUMN IF NOT EXISTS link_clicks INTEGER DEFAULT 0;
+
+-- Conversiones de Google SIN redondear: `carts` es BIGINT (legacy e-commerce) y perdia
+-- todo lo que caia bajo 0,5/dia. `all_conversions` incluye las secundarias (llamadas,
+-- vistas de pagina) que NO son leads: sirve para explicar, no para reportar resultado.
+ALTER TABLE google_ads_campaigns ADD COLUMN IF NOT EXISTS conversions NUMERIC(12,4) DEFAULT 0;
+ALTER TABLE google_ads_campaigns ADD COLUMN IF NOT EXISTS all_conversions NUMERIC(12,4) DEFAULT 0;
+
 -- Breakdowns demográficos / placements de Meta Ads
 -- dimension_type ∈ {age, gender, region, publisher_platform}
 CREATE TABLE IF NOT EXISTS meta_ads_breakdowns (

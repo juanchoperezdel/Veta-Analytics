@@ -2,7 +2,11 @@ name: Sync Data
 
 on:
   schedule:
-    - cron: '0 * * * *'   # cada hora
+    # Cada 6 horas. Estaba en '0 * * * *' (cada hora), pero GitHub hace throttling de
+    # los schedules frecuentes: de 24 corridas programadas por dia se ejecutaban ~5, con
+    # huecos de hasta 12 h. Espaciado a 6 h el schedule se respeta y quedan 4 corridas parejas (peor
+    # caso: 6 h de antiguedad) — de sobra para data de pauta, y baja el consumo de cuota.
+    - cron: '0 */6 * * *'
   workflow_dispatch:        # permite trigger manual desde GitHub UI
 
 jobs:

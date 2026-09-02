@@ -34,11 +34,57 @@ const META_CONV_PRIORITY = [
   'offsite_conversion.fb_pixel_lead',
   'onsite_web_lead',
   'onsite_conversion.lead_grouped',
+  'leadgen_grouped',
+  'leadgen.other',
   'complete_registration',
   'omni_complete_registration',
   'offsite_conversion.fb_pixel_complete_registration',
   'onsite_conversion.messaging_conversation_started_7d',
 ];
+// Versión de la Graph API en un solo lugar (antes estaba repetida en cada llamada).
+const GRAPH = 'v21.0';
+
+// Meta devuelve 429/500/503 y errores de cuota (code 4 / 17 / 613) bajo carga. Sin
+// reintento, el error sube al catch del loop de clientes y el run queda "verde" con
+// data faltante. Backoff exponencial: 1s, 2s, 4s.
+async function metaFetch(url: string, tries = 4): Promise<any> {
+  let lastErr = '';
+  for (let i = 0; i < tries; i++) {
+    const res = await fetch(url);
+    const text = await res.text();
+    let body: any = null;
+    try { body = JSON.parse(text); } catch { /* respuesta no-JSON */ }
+    const code = body?.error?.code;
+    const retriable = res.status === 429 || res.status >= 500 || code === 4 || code === 17 || code === 613;
+    if (res.ok && body && !body.error) {
+      const usage = res.headers.get('x-business-use-case-usage');
+      if (usage && /"call_count":\s*(8[5-9]|9\d|100)/.test(usage)) console.warn(`  ⚠ Meta cuota alta: ${usage.slice(0, 200)}`);
+      return body;
+    }
+    lastErr = `${res.status} ${text.slice(0, 300)}`;
+    if (!retriable || i === tries - 1) break;
+    await new Promise(r => setTimeout(r, 1000 * 2 ** i));
+  }
+  throw new Error(`Meta API error: ${lastErr}`);
+}
+
+// Recorre TODAS las páginas de un endpoint de insights. Sin esto, `limit=500` trunca en
+// silencio: con time_increment=1 y 30 días, `region` (24 provincias) se pasa siempre y
+// se perdían los días más recientes (pasó: la demografía por provincia quedó congelada
+// el 23-08). Regla: cualquier query de insights con ventana larga DEBE paginar.
+async function metaFetchAll(url: string): Promise<any[]> {
+  const out: any[] = [];
+  let next: string | null = url;
+  let pages = 0;
+  while (next && pages < 50) {
+    const body: any = await metaFetch(next);
+    out.push(...(body.data ?? []));
+    next = body.paging?.next ?? null;
+    pages++;
+  }
+  return out;
+}
+
 function extractMetaConversions(actions: any[]): number {
   if (!actions?.length) return 0;
   for (const t of META_CONV_PRIORITY) {
@@ -66,7 +112,7 @@ async function syncMetaAds(clientId: string, adAccountId: string, accessToken: s
             'PENDING_BILLING_INFO','CAMPAIGN_PAUSED','ADSET_PAUSED','IN_PROCESS','WITH_ISSUES'],
   }]);
 
-  const url = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
+  const url = `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/insights?` +
     `level=campaign&time_increment=1` +
     `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
     `&use_unified_attribution_setting=true` +
@@ -74,23 +120,18 @@ async function syncMetaAds(clientId: string, adAccountId: string, accessToken: s
     `&filtering=${encodeURIComponent(filtering)}` +
     `&fields=${fields}&access_token=${accessToken}&limit=500`;
 
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Meta API error: ${res.status} ${await res.text()}`);
-  const body = await res.json();
-  const data: any[] = body.data ?? [];
+  const data: any[] = await metaFetchAll(url);
 
   // Para saber el effective_status actual (no viene en insights), una query paralela.
+  // Paginada: una cuenta con historia pasa las 500 campañas contando archivadas.
   const statusByCampaign = new Map<string, string>();
   try {
-    const sRes = await fetch(
-      `https://graph.facebook.com/v21.0/act_${adAccountId}/campaigns?` +
+    const camps = await metaFetchAll(
+      `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/campaigns?` +
       `fields=id,effective_status&limit=500&access_token=${accessToken}`
     );
-    if (sRes.ok) {
-      const sBody = await sRes.json();
-      for (const c of (sBody.data ?? [])) statusByCampaign.set(c.id, c.effective_status);
-    }
-  } catch { /* status es opcional */ }
+    for (const c of camps) statusByCampaign.set(c.id, c.effective_status);
+  } catch (e: any) { console.warn(`  ⚠ effective_status de campañas no disponible:`, e?.message ?? e); }
 
   for (const row of data) {
     const date      = row.date_start;
@@ -166,7 +207,7 @@ async function syncGoogleAds(clientId: string, customerId: string) {
       campaign.id, campaign.name,
       metrics.cost_micros, metrics.impressions, metrics.clicks,
       metrics.ctr, metrics.average_cpc,
-      metrics.conversions, metrics.conversions_value
+      metrics.conversions, metrics.conversions_value, metrics.all_conversions
     FROM campaign
     WHERE segments.date BETWEEN '${since}' AND '${until}'
       AND metrics.cost_micros > 0
@@ -194,26 +235,33 @@ async function syncGoogleAds(clientId: string, customerId: string) {
   for (const row of results) {
     const date        = row.segments.date;
     const spend       = (row.metrics.costMicros ?? 0) / 1_000_000;
-    const conversions = parseFloat(row.metrics.conversions ?? '0');
-    const revenue     = parseFloat(row.metrics.conversionsValue ?? '0');
+    // Google devuelve conversiones fraccionadas (atribución). Redondear por día perdía
+    // todo lo que caía bajo 0,5 → cuentas de bajo volumen mostraban 0 conversiones que
+    // en realidad existían. `carts` (BIGINT, legacy e-commerce) se mantiene por
+    // compatibilidad con el dashboard interno; el valor exacto va en `conversions`.
+    const conversions    = parseFloat(row.metrics.conversions ?? '0');
+    const allConversions = parseFloat(row.metrics.allConversions ?? '0');
+    const revenue        = parseFloat(row.metrics.conversionsValue ?? '0');
 
     const route       = parseRoute(row.campaign.name);
 
     await sql`
       INSERT INTO google_ads_campaigns
-        (client_id, snapshot_date, campaign_id, name, spend, impressions, clicks, ctr, cpc, carts, revenue, roas, route)
+        (client_id, snapshot_date, campaign_id, name, spend, impressions, clicks, ctr, cpc,
+         carts, conversions, all_conversions, revenue, roas, route)
       VALUES
         (${clientId}, ${date}, ${String(row.campaign.id)}, ${row.campaign.name},
          ${spend}, ${row.metrics.impressions ?? 0}, ${row.metrics.clicks ?? 0},
          ${parseFloat(row.metrics.ctr ?? '0')},
          ${(row.metrics.averageCpc ?? 0) / 1_000_000},
-         ${Math.round(conversions)}, ${revenue},
+         ${Math.round(conversions)}, ${conversions}, ${allConversions}, ${revenue},
          ${spend > 0 ? revenue / spend : 0},
          ${route})
       ON CONFLICT (client_id, snapshot_date, campaign_id)
       DO UPDATE SET
         spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
         ctr = EXCLUDED.ctr, cpc = EXCLUDED.cpc, carts = EXCLUDED.carts,
+        conversions = EXCLUDED.conversions, all_conversions = EXCLUDED.all_conversions,
         revenue = EXCLUDED.revenue, roas = EXCLUDED.roas,
         route = EXCLUDED.route, synced_at = NOW()
     `;
@@ -383,11 +431,11 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
     'ad_id', 'ad_name',
     'campaign_id', 'campaign_name',
     'date_start',
-    'spend', 'impressions', 'clicks', 'reach',
+    'spend', 'impressions', 'clicks', 'inline_link_clicks', 'reach',
     'actions', 'action_values', 'ctr',
   ].join(',');
 
-  let url: string | null = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
+  const url = `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/insights?` +
     `level=ad&time_increment=1` +
     `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
     `&filtering=${encodeURIComponent(JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]))}` +
@@ -395,14 +443,7 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
 
   // PAGINAR: con 30 días × decenas de ads se superan las 500 filas de una página.
   // Sin paginar se truncaban los días recientes (ej: registros del webinar de hoy).
-  const data: any[] = [];
-  while (url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Meta creatives API error: ${res.status} ${await res.text()}`);
-    const body: any = await res.json();
-    data.push(...(body.data ?? []));
-    url = body.paging?.next ?? null;
-  }
+  const data: any[] = await metaFetchAll(url);
 
   // Pedimos creative info (thumbnail_url + effective_status) — solo para los top ads por spend
   // y con sleep de 1.5s entre batches para no pegar rate limit.
@@ -423,7 +464,7 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
       relative_url: `${id}?fields=effective_status,preview_shareable_link,creative{thumbnail_url,instagram_permalink_url}`,
     }));
     try {
-      const bRes = await fetch('https://graph.facebook.com/v21.0/', {
+      const bRes = await fetch(`https://graph.facebook.com/${GRAPH}/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -454,6 +495,9 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
     const spend     = parseFloat(row.spend ?? '0');
     const impressions = parseInt(row.impressions ?? '0');
     const clicks    = parseInt(row.clicks ?? '0');
+    // `clicks` de Meta incluye reacciones, comentarios y expansión de imagen. Para el
+    // funnel (click → visita a la landing) el numerador honesto es el click AL LINK.
+    const linkClicks = parseInt(row.inline_link_clicks ?? (row.actions ?? []).find((a: any) => a.action_type === 'link_click')?.value ?? '0');
     const reach     = parseInt(row.reach ?? '0');
     // Conversión primaria por ad (purchase / lead / registro / mensaje) — ver extractMetaConversions.
     const purchases = extractMetaConversions(row.actions ?? []);
@@ -469,17 +513,18 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
       INSERT INTO meta_ads_creatives
         (client_id, snapshot_date, ad_id, ad_name, campaign_id, campaign_name,
          thumbnail_url, effective_status,
-         spend, impressions, clicks, reach, purchases, revenue, cpa, roas, ctr, landing_page_view, preview_link)
+         spend, impressions, clicks, link_clicks, reach, purchases, revenue, cpa, roas, ctr, landing_page_view, preview_link)
       VALUES
         (${clientId}, ${date}, ${row.ad_id}, ${row.ad_name}, ${row.campaign_id}, ${row.campaign_name},
          ${info?.thumb ?? null}, ${info?.status ?? null},
-         ${spend}, ${impressions}, ${clicks}, ${reach}, ${purchases}, ${revenue},
+         ${spend}, ${impressions}, ${clicks}, ${linkClicks}, ${reach}, ${purchases}, ${revenue},
          ${cpa}, ${roas}, ${ctr}, ${lpv}, ${info?.link ?? null})
       ON CONFLICT (client_id, snapshot_date, ad_id)
       DO UPDATE SET
         ad_name = EXCLUDED.ad_name, campaign_id = EXCLUDED.campaign_id, campaign_name = EXCLUDED.campaign_name,
         thumbnail_url = EXCLUDED.thumbnail_url, effective_status = EXCLUDED.effective_status,
         spend = EXCLUDED.spend, impressions = EXCLUDED.impressions, clicks = EXCLUDED.clicks,
+        link_clicks = EXCLUDED.link_clicks,
         reach = EXCLUDED.reach, purchases = EXCLUDED.purchases, revenue = EXCLUDED.revenue,
         cpa = EXCLUDED.cpa, roas = EXCLUDED.roas, ctr = EXCLUDED.ctr,
         landing_page_view = EXCLUDED.landing_page_view,
@@ -502,20 +547,16 @@ async function syncMetaBreakdowns(clientId: string, adAccountId: string, accessT
       'actions', 'action_values',
     ].join(',');
 
-    const url = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
+    const url = `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/insights?` +
       `level=account&time_increment=1` +
       `&breakdowns=${dim}` +
       `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
       `&fields=${fields}&access_token=${accessToken}&limit=500`;
 
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        console.error(`  ✗ Meta breakdown ${dim}: ${res.status}`);
-        continue;
-      }
-      const body = await res.json();
-      const data: any[] = body.data ?? [];
+      // PAGINAR: `region` (24 provincias × 30 días) supera las 500 filas de una página.
+      // Sin esto la demografía por provincia se congelaba (quedó parada el 23-08-2026).
+      const data: any[] = await metaFetchAll(url);
 
       for (const row of data) {
         const date      = row.date_start;
@@ -524,7 +565,9 @@ async function syncMetaBreakdowns(clientId: string, adAccountId: string, accessT
         const impressions = parseInt(row.impressions ?? '0');
         const clicks    = parseInt(row.clicks ?? '0');
         const reach     = parseInt(row.reach ?? '0');
-        const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
+        // Conversión primaria de la cuenta (no solo `purchase`): sin esto, todo cliente
+        // lead-gen mostraba 0 leads y CPL $0 en la demografía del reporte público.
+        const purchases = extractMetaConversions(row.actions ?? []);
         const revenue   = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
         const cpa       = Number(purchases) > 0 ? spend / Number(purchases) : 0;
         const roas      = spend > 0 ? revenue / spend : 0;
@@ -556,16 +599,13 @@ async function syncMetaHourly(clientId: string, adAccountId: string, accessToken
   const { since, until } = dateRange(14);  // 14 días de hourly: suficiente para patrones, no explota volumen
   const fields = ['date_start', 'spend', 'impressions', 'clicks', 'actions', 'action_values'].join(',');
 
-  const url = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?` +
+  const url = `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/insights?` +
     `level=account&time_increment=1` +
     `&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone` +
     `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
     `&fields=${fields}&access_token=${accessToken}&limit=500`;
 
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Meta hourly API error: ${res.status} ${await res.text()}`);
-  const body = await res.json();
-  const data: any[] = body.data ?? [];
+  const data: any[] = await metaFetchAll(url);
 
   for (const row of data) {
     // hourly_stats viene como "00:00:00 - 00:59:59"
@@ -574,7 +614,7 @@ async function syncMetaHourly(clientId: string, adAccountId: string, accessToken
     const spend = parseFloat(row.spend ?? '0');
     const impressions = parseInt(row.impressions ?? '0');
     const clicks = parseInt(row.clicks ?? '0');
-    const purchases = (row.actions ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? 0;
+    const purchases = extractMetaConversions(row.actions ?? []);
     const revenue = parseFloat((row.action_values ?? []).find((a: any) => a.action_type === 'purchase')?.value ?? '0');
 
     await sql`
@@ -920,6 +960,16 @@ async function main() {
     WHERE active = true
   `;
 
+  // Sin esto, cualquier fallo (token vencido, version de API removida, rate limit) se
+  // tragaba en el catch y el run de GitHub Actions salia VERDE con data faltante. Paso:
+  // Google dejo de sincronizar el 12-08 y nadie se entero por 2 semanas.
+  const failures: string[] = [];
+  const fail = (slug: string, what: string, e: any) => {
+    const msg = String(e?.message ?? e).slice(0, 400);
+    failures.push(`${slug}/${what}: ${msg}`);
+    console.error(`  x ${what}:`, msg);
+  };
+
   for (const client of clients) {
     console.log(`\n→ Syncing client: ${client.slug}`);
 
@@ -937,19 +987,19 @@ async function main() {
     } else {
       try {
         await syncMetaAds(client.id, metaAcct, metaTok);
-      } catch (e) { console.error(`  ✗ Meta Ads:`, e); }
+      } catch (e) { fail(client.slug, 'Meta Ads', e); }
 
       try {
         await syncMetaCreatives(client.id, metaAcct, metaTok);
-      } catch (e) { console.error(`  ✗ Meta Creatives:`, e); }
+      } catch (e) { fail(client.slug, 'Meta Creatives', e); }
 
       try {
         await syncMetaBreakdowns(client.id, metaAcct, metaTok);
-      } catch (e) { console.error(`  ✗ Meta Breakdowns:`, e); }
+      } catch (e) { fail(client.slug, 'Meta Breakdowns', e); }
 
       try {
         await syncMetaHourly(client.id, metaAcct, metaTok);
-      } catch (e) { console.error(`  ✗ Meta Hourly:`, e); }
+      } catch (e) { fail(client.slug, 'Meta Hourly', e); }
     }
 
     if (!gAdsCust) {
@@ -957,15 +1007,15 @@ async function main() {
     } else {
       try {
         await syncGoogleAds(client.id, gAdsCust);
-      } catch (e) { console.error(`  ✗ Google Ads:`, e); }
+      } catch (e) { fail(client.slug, 'Google Ads', e); }
 
       try {
         await syncGoogleAdsSearchTerms(client.id, gAdsCust);
-      } catch (e) { console.error(`  ✗ Google Ads Search Terms:`, e); }
+      } catch (e) { fail(client.slug, 'Google Ads Search Terms', e); }
 
       try {
         await syncGoogleAdsHourly(client.id, gAdsCust);
-      } catch (e) { console.error(`  ✗ Google Ads Hourly:`, e); }
+      } catch (e) { fail(client.slug, 'Google Ads Hourly', e); }
     }
 
     // YouTube deshabilitado por ahora
@@ -979,7 +1029,8 @@ async function main() {
         // GA4 puede tener token expirado (OAuth en modo Testing expira a los 7 días).
         // No frenamos el resto del sync — los demás canales siguen actualizándose.
         const isAuth = String(e?.message ?? '').includes('invalid_grant') || String(e?.message ?? '').includes('expired');
-        console.error(`  ✗ GA4${isAuth ? ' (token EXPIRADO — refrescar GA4_SERVICE_ACCOUNT_JSON)' : ''}:`, e?.message ?? e);
+        if (isAuth) console.error(`  x GA4 (token EXPIRADO - refrescar GA4_SERVICE_ACCOUNT_JSON):`, e?.message ?? e);
+        else fail(client.slug, 'GA4', e);
       }
     }
 
@@ -994,10 +1045,17 @@ async function main() {
     } else {
       try {
         await syncGhlLeads(client.id, ghlLoc, ghlTok);
-      } catch (e: any) { console.error(`  ✗ GHL CRM:`, e?.message ?? e); }
+      } catch (e: any) { fail(client.slug, 'GHL CRM', e); }
     }
   }
 
+  if (failures.length) {
+    console.error(`
+✗ Sync termino con ${failures.length} fallo(s):`);
+    for (const f of failures) console.error(`   - ${f}`);
+    process.exitCode = 1;   // el job de GitHub Actions queda en ROJO
+    return;
+  }
   console.log('\n✓ Sync complete\n');
 }
 
