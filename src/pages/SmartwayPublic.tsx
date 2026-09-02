@@ -45,7 +45,7 @@ type GoogleData = Funnel & {
 };
 type Data = {
   config: { name: string; currency: string; period: { start: string; end: string }; firstDataDate: string | null; generatedAt: string; dataUpdatedAt: string | null; metaUpdatedAt: string | null; googleUpdatedAt: string | null };
-  totals: { spendMeta: number; spendGoogle: number; spendTotal: number; leads: number; cplTotal: number };
+  totals: { spendMeta: number; spendGoogle: number; spendTotal: number; leads: number; cplTotal: number; leadsAllMeta: number };
   overall: Funnel;
   channels: { form: Block; landing: Block; remarketing: Block };
   traffic: Block | null;
@@ -410,6 +410,13 @@ export default function SmartwayPublic() {
         {Object.keys(demographics).some(k => (demographics[k] ?? []).length > 0) && (
           <section>
             <SectionTitle icon={<Users size={15} />} title="A quién le llegó la pauta" hint="cuánto se invirtió y CTR por segmento — no implica calidad del lead" />
+            {totals.leadsAllMeta > totals.leads && (
+              <p className="text-[11px] text-slate-500 bg-slate-100/70 border border-slate-200 rounded-lg px-3 py-2 mb-3 leading-relaxed">
+                Meta solo entrega esta apertura para <span className="font-semibold">toda la cuenta junta</span>, sin poder
+                separar por campaña. Por eso los leads de estas tarjetas suman {totals.leadsAllMeta} (incluyen el webinar
+                y el tráfico) y no los {totals.leads} del embudo comercial.
+              </p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {(['age', 'gender', 'region', 'publisher_platform'] as const).map(dim =>
                 (demographics[dim] ?? []).length ? (

@@ -430,6 +430,11 @@ export default async (req: Request, _context: Context) => {
       spendMeta: metaSpendTotal, spendGoogle, spendTotal,
       leads: overall.leads,
       cplTotal: overall.leads > 0 ? spendTotal / overall.leads : 0,
+      // Leads de TODA la cuenta de Meta (comercial + webinar + trafico). La demografia
+      // la pide Meta a nivel cuenta y no se puede filtrar por campana, asi que sus leads
+      // suman este numero y no el comercial. El front lo aclara para que no parezca un
+      // descuadre del reporte.
+      leadsAllMeta: allAds.reduce((n, a) => n + a.leads, 0),
     },
     overall, channels, traffic, webinar,
     verticals, campaignTypes, daily, notes,
