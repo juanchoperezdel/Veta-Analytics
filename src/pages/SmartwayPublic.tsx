@@ -96,7 +96,7 @@ export default function SmartwayPublic() {
     document.title = 'Smartway · Reporte de pauta';
     let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
     if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
-    link.href = '/smartway-logo.png';
+    link.href = '/smartway-icon.png';
   }, []);
 
   useEffect(() => {
@@ -135,10 +135,10 @@ export default function SmartwayPublic() {
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
         <div className="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <Wordmark />
+            <Wordmark name={config.name} />
             <div>
-              <h1 className="text-lg font-black leading-none">{config.name}</h1>
-              <p className="text-xs text-slate-500 mt-0.5">Reporte de pauta · Meta + Google</p>
+              <h1 className="sr-only">{config.name}</h1>
+              <p className="text-xs text-slate-500 font-semibold">Reporte de pauta · Meta + Google</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -447,10 +447,10 @@ export default function SmartwayPublic() {
 // ─── Wordmark ──────────────────────────────────────────────────────────────────
 // Marca del cliente (negro + rojo), no el verde de la agencia. Si más adelante se sube
 // /public/smartway-logo.png, la <img> lo toma y el wordmark queda de respaldo.
-function Wordmark() {
+function Wordmark({ name }: { name: string }) {
   const [failed, setFailed] = useState(false);
   if (!failed) {
-    return <img src="/smartway-logo.png" alt="Smartway" className="h-9 w-auto max-w-[130px] object-contain" onError={() => setFailed(true)} />;
+    return <img src="/smartway-logo.png" alt={name} className="h-8 w-auto max-w-[190px] object-contain" onError={() => setFailed(true)} />;
   }
   return (
     <div className="h-9 px-2.5 rounded-xl bg-[#111] text-white grid place-items-center">
