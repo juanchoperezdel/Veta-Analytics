@@ -122,7 +122,9 @@ export default function SmartwayPublic() {
 
   const { overall, totals, channels, traffic, webinar, verticals, campaignTypes, daily, notes, ads, google, demographics, demoCoverage, config } = data;
   const dataUpd = config.dataUpdatedAt ? new Date(config.dataUpdatedAt) : null;
-  const fmtTime = (d: Date) => d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  // hour12:false — sin esto es-AR devuelve "12:26 p. m." y con el "hs" del label queda
+  // "12:26 p. m. hs", redundante.
+  const fmtTime = (d: Date) => d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 
   // ¿El rango pedido es más ancho que la vida de la cuenta en el sistema?
   const shortHistory = config.firstDataDate && config.firstDataDate > config.period.start;
