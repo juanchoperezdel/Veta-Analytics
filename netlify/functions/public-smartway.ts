@@ -462,11 +462,11 @@ export default async (req: Request, _context: Context) => {
 
   // ─── De qué anuncio vino cada lead (CRM GoHighLevel) ─────────────────────────
   // GHL guarda la atribución al anuncio de Meta (utmAdId/utmContent) en cada contacto;
-  // el sync la baja a crm_leads. La página es pública: el NOMBRE del lead solo viaja si
-  // el link trae la clave del cliente (?k=, env SMARTWAY_LEADS_KEY). Teléfono y email
-  // nunca: para eso está el CRM.
-  const leadsKey = process.env.SMARTWAY_LEADS_KEY || '';
-  const showNames = !!leadsKey && url.searchParams.get('k') === leadsKey;
+  // el sync la baja a crm_leads. Se muestra el NOMBRE del lead en el link normal: el
+  // owner decidió (16-10-2026) que el reporte solo lo abre el cliente y no hace falta
+  // clave. Para volver a exigirla: showNames = url.searchParams.get('k') === env
+  // SMARTWAY_LEADS_KEY (sigue cargada en Netlify). Teléfono y email nunca.
+  const showNames = true;
   const crmRows = await sql`
     SELECT to_char(l.date_added AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM-DD') AS d,
            l.ad_id, COALESCE(m.ad_name, l.ad_name) AS ad_name, l.campaign, l.source, l.quality, m.thumb,
