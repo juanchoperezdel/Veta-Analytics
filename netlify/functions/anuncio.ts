@@ -52,15 +52,14 @@ export default async (req: Request, _context: Context) => {
 
   const img = ad.creative?.image_url || ad.creative?.thumbnail_url || null;
   const ig = ad.creative?.instagram_permalink_url || null;
-  const fb = ad.preview_shareable_link || null;
+  // La vista previa compartible de Meta (preview_shareable_link) pide iniciar sesión en
+  // Business: no sirve para alguien sin acceso, por eso no se ofrece.
   const sub = [ad.campaign?.name, ad.adset?.name].filter(Boolean).join(' · ');
 
   return page(ad.name || 'Anuncio', `
     <div class="h"><span class="k">El lead llegó por este anuncio</span><h1>${esc(ad.name || 'Anuncio')}</h1>${sub ? `<p class="s">${esc(sub)}</p>` : '<p class="s"></p>'}</div>
     ${img ? `<img src="${esc(img)}" alt="Imagen del anuncio">` : ''}
     <div class="b">
-      ${fb ? `<a class="btn" href="${esc(fb)}" target="_blank" rel="noopener">Ver el anuncio completo</a>` : ''}
-      ${ig ? `<a class="btn sec" href="${esc(ig)}" target="_blank" rel="noopener">Verlo en Instagram</a>` : ''}
-      <p class="n">Si es un video, el botón lo abre con sonido y texto.</p>
+      ${ig ? `<a class="btn" href="${esc(ig)}" target="_blank" rel="noopener">Verlo en Instagram</a>` : ''}
     </div>`);
 };
