@@ -43,6 +43,16 @@ const SHOW_NOTES = {
   cobertura: true,   // aviso si una seccion no cubre todo el periodo
 };
 
+function originLabel(source: string | null): string {
+  const s = (source || '').toLowerCase();
+  if (/asesor|aseor|derivad|referid/.test(s)) return 'Derivación';
+  if (/instagram/.test(s)) return 'Instagram';
+  if (/facebook/.test(s)) return 'Facebook';
+  if (/whats|wsp/.test(s)) return 'WhatsApp';
+  if (/web|sitio|landing|google/.test(s)) return 'Sitio web';
+  return 'Otro canal';
+}
+
 // Fechas en JS (string ISO) — evita la aritmética de fechas con parámetros en Neon.
 function iso(d: Date) { return d.toISOString().split('T')[0]; }
 function todayISO() { return iso(new Date()); }
@@ -478,7 +488,9 @@ export default async (req: Request, _context: Context) => {
       date: r.d, adId: r.ad_id ?? null, adName: r.ad_name ?? null, campaign: r.campaign ?? null,
       vertical: !fromAd ? null : /orbatix/i.test(label) ? 'Webinar Orbatix' : classifyVertical(label),
       quality: r.quality ?? 'unclassified',
-      origin: fromAd ? 'Meta' : (r.source || 'Otro origen'),
+      // El origen crudo de GHL puede traer el nombre de una persona (ej. la asesora que
+      // derivó el lead): se traduce a un canal genérico para no exponerlo.
+      origin: fromAd ? 'Meta' : originLabel(r.source),
       thumbnail: r.thumb ?? null,
     };
   });
@@ -500,6 +512,9 @@ export default async (req: Request, _context: Context) => {
   const crmLeads = {
     updatedAt: crmUpd?.s ?? null,
     showNames,
+    // Leads que reporta Meta en el embudo comercial del mismo período: el front lo usa
+    // para mostrar que el CRM los registra a todos (solo si efectivamente es así).
+    metaLeads: overall.leads,
     total: crmLeadRows.length,
     fromAds: crmLeadRows.filter(r => r.origin === 'Meta').length,
     rows: crmLeadRows,

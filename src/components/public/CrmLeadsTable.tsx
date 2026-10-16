@@ -14,14 +14,14 @@ export type CrmAdRow = {
   adId: string | null; adName: string | null; campaign: string | null; vertical: string | null;
   thumbnail: string | null; leads: number; qualified: number; meeting: number; lastDate: string;
 };
-export type CrmLeads = { updatedAt: string | null; showNames?: boolean; total: number; fromAds: number; rows: CrmLeadRow[]; byAd: CrmAdRow[] };
+export type CrmLeads = { updatedAt: string | null; showNames?: boolean; metaLeads?: number; total: number; fromAds: number; rows: CrmLeadRow[]; byAd: CrmAdRow[] };
 
 const QUALITY: Record<string, { label: string; cls: string }> = {
   meeting:      { label: 'Reunión',        cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
   qualified:    { label: 'Calificado',     cls: 'bg-sky-50 text-sky-700 ring-sky-200' },
   unqualified:  { label: 'No calificado',  cls: 'bg-slate-100 text-slate-600 ring-slate-200' },
   no_response:  { label: 'Sin respuesta',  cls: 'bg-amber-50 text-amber-700 ring-amber-200' },
-  unclassified: { label: 'Sin clasificar', cls: 'bg-white text-slate-400 ring-slate-200' },
+  unclassified: { label: 'A calificar',    cls: 'bg-slate-50 text-slate-500 ring-slate-200' },
 };
 
 const PAGE = 40;
@@ -41,6 +41,11 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
   const [view, setView] = useState<'leads' | 'ads'>('leads');
   const [shown, setShown] = useState(PAGE);
   const other = data.total - data.fromAds;
+  // Las columnas de calidad solo se muestran cuando el equipo ya calificó al menos la
+  // mitad de los leads; si no, una columna llena de "—" se lee como "no trae nada bueno".
+  const classified = data.rows.filter(r => r.quality !== 'unclassified').length;
+  const showQuality = data.total > 0 && classified / data.total >= 0.5;
+  const allMetaInCrm = (data.metaLeads ?? 0) > 0 && data.fromAds >= (data.metaLeads ?? 0);
   const updated = data.updatedAt
     ? new Date(data.updatedAt).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
     : null;
@@ -53,9 +58,10 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
     <Card className="p-0 overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
         <p className="text-[13px] text-slate-600">
-          <b className="text-slate-900 tabular-nums">{data.total}</b> leads en el CRM ·{' '}
-          <b className="text-slate-900 tabular-nums">{data.fromAds}</b> con el anuncio identificado
-          {other > 0 && <> · <span className="tabular-nums">{other}</span> llegaron por otra vía</>}
+          {allMetaInCrm
+            ? <>Los <b className="text-slate-900 tabular-nums">{data.metaLeads}</b> leads que trajo la pauta están en el CRM, cada uno con su anuncio</>
+            : <><b className="text-slate-900 tabular-nums">{data.total}</b> leads en el CRM · <b className="text-slate-900 tabular-nums">{data.fromAds}</b> con su anuncio</>}
+          {other > 0 && <> · <span className="tabular-nums">+{other}</span> por otros canales</>}
         </p>
         <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[12px] font-bold">
           {([['leads', 'Lead por lead'], ['ads', 'Por anuncio']] as const).map(([k, l]) => (
@@ -99,7 +105,7 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
                             )}
                           </span>
                         </span>
-                      ) : <span className="text-slate-400">Sin anuncio · {r.origin}</span>}
+                      ) : <span className="text-slate-500">Llegó por {r.origin}</span>}
                     </td>
                     <td className="px-3 py-2.5 text-slate-500 hidden md:table-cell truncate max-w-[220px]">{r.campaign ?? '—'}</td>
                     <td className="px-4 py-2.5 text-right">
@@ -116,8 +122,8 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
               <tr>
                 <th className="text-left font-bold px-4 py-2.5">Anuncio</th>
                 <th className="text-right font-bold px-3 py-2.5">Leads</th>
-                <th className="text-right font-bold px-3 py-2.5 hidden sm:table-cell">Calificados</th>
-                <th className="text-right font-bold px-3 py-2.5 hidden sm:table-cell">Reuniones</th>
+                {showQuality && <th className="text-right font-bold px-3 py-2.5 hidden sm:table-cell">Calificados</th>}
+                {showQuality && <th className="text-right font-bold px-3 py-2.5 hidden sm:table-cell">Reuniones</th>}
                 <th className="text-right font-bold px-4 py-2.5">Último lead</th>
               </tr>
             </thead>
@@ -134,8 +140,8 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
                     </span>
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums font-bold">{a.leads}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums hidden sm:table-cell">{a.qualified || <span className="text-slate-300">—</span>}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums hidden sm:table-cell">{a.meeting || <span className="text-slate-300">—</span>}</td>
+                  {showQuality && <td className="px-3 py-2.5 text-right tabular-nums hidden sm:table-cell">{a.qualified || <span className="text-slate-300">—</span>}</td>}
+                  {showQuality && <td className="px-3 py-2.5 text-right tabular-nums hidden sm:table-cell">{a.meeting || <span className="text-slate-300">—</span>}</td>}
                   <td className="px-4 py-2.5 text-right text-slate-500 tabular-nums whitespace-nowrap capitalize">{fmtDay(a.lastDate)}</td>
                 </tr>
               ))}
@@ -150,7 +156,7 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
         </button>
       )}
       <p className="border-t border-slate-100 px-4 py-2.5 text-[11px] text-slate-400">
-        Fuente: CRM (GoHighLevel){updated && <> · actualizado {updated}</>}. El estado sale de las etiquetas que el equipo carga en el CRM; si un lead no tiene etiqueta figura "Sin clasificar".
+        Fuente: CRM (GoHighLevel){updated && <> · actualizado {updated}</>}. El estado lo carga el equipo comercial en el CRM a medida que contacta a cada lead.
       </p>
     </Card>
   );
