@@ -7,14 +7,14 @@ import { cn } from '@/lib/utils';
 // se muestra nombre, teléfono ni email del lead, solo día, anuncio, campaña y estado.
 
 export type CrmLeadRow = {
-  date: string; adId: string | null; adName: string | null; campaign: string | null;
+  name: string | null; date: string; adId: string | null; adName: string | null; campaign: string | null;
   vertical: string | null; quality: string; origin: string; thumbnail: string | null;
 };
 export type CrmAdRow = {
   adId: string | null; adName: string | null; campaign: string | null; vertical: string | null;
   thumbnail: string | null; leads: number; qualified: number; meeting: number; lastDate: string;
 };
-export type CrmLeads = { updatedAt: string | null; total: number; fromAds: number; rows: CrmLeadRow[]; byAd: CrmAdRow[] };
+export type CrmLeads = { updatedAt: string | null; showNames?: boolean; total: number; fromAds: number; rows: CrmLeadRow[]; byAd: CrmAdRow[] };
 
 const QUALITY: Record<string, { label: string; cls: string }> = {
   meeting:      { label: 'Reunión',        cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200' },
@@ -73,6 +73,7 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
               <tr>
                 <th className="text-left font-bold px-4 py-2.5">Día</th>
+                {data.showNames && <th className="text-left font-bold px-3 py-2.5">Lead</th>}
                 <th className="text-left font-bold px-3 py-2.5">Anuncio</th>
                 <th className="text-left font-bold px-3 py-2.5 hidden md:table-cell">Campaña</th>
                 <th className="text-right font-bold px-4 py-2.5">Estado</th>
@@ -84,6 +85,7 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
                 return (
                   <tr key={i} className="border-t border-slate-100">
                     <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 tabular-nums capitalize">{fmtDay(r.date)}</td>
+                    {data.showNames && <td className="px-3 py-2.5 font-bold whitespace-nowrap">{r.name ?? <span className="text-slate-300">—</span>}</td>}
                     <td className="px-3 py-2.5">
                       {r.adName ? (
                         <span className="flex items-center gap-2.5 min-w-0">

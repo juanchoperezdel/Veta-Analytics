@@ -82,14 +82,19 @@ export async function syncGhlLeads(clientId: string, locationId: string, token: 
       if (attr.adId) withAd++;
       counts[quality]++;
       total++;
+      // Nombre y empresa: el reporte público solo los muestra con la clave del cliente.
+      const name = (c.contactName || [c.firstName, c.lastName].filter(Boolean).join(' ') || '').trim() || null;
+      const company = (c.companyName || '').trim() || null;
 
       await sql`
         INSERT INTO crm_leads
-          (client_id, contact_id, ad_id, ad_name, campaign, form_name, source, quality, tags, date_added, synced_at)
+          (client_id, contact_id, ad_id, ad_name, campaign, form_name, source, quality, tags, date_added, contact_name, company, synced_at)
         VALUES
           (${clientId}, ${c.id}, ${attr.adId}, ${attr.adName}, ${attr.campaign}, ${null},
-           ${c.source ?? attr.source ?? null}, ${quality}, ${tags}, ${c.dateAdded ?? null}, NOW())
+           ${c.source ?? attr.source ?? null}, ${quality}, ${tags}, ${c.dateAdded ?? null}, ${name}, ${company}, NOW())
         ON CONFLICT (client_id, contact_id) DO UPDATE SET
+          contact_name = EXCLUDED.contact_name,
+          company      = EXCLUDED.company,
           ad_id      = EXCLUDED.ad_id,
           ad_name    = EXCLUDED.ad_name,
           campaign   = EXCLUDED.campaign,

@@ -452,11 +452,15 @@ export default async (req: Request, _context: Context) => {
 
   // ─── De qué anuncio vino cada lead (CRM GoHighLevel) ─────────────────────────
   // GHL guarda la atribución al anuncio de Meta (utmAdId/utmContent) en cada contacto;
-  // el sync la baja a crm_leads. La página es pública: NO se expone nombre, teléfono ni
-  // email, solo día, anuncio, campaña y estado.
+  // el sync la baja a crm_leads. La página es pública: el NOMBRE del lead solo viaja si
+  // el link trae la clave del cliente (?k=, env SMARTWAY_LEADS_KEY). Teléfono y email
+  // nunca: para eso está el CRM.
+  const leadsKey = process.env.SMARTWAY_LEADS_KEY || '';
+  const showNames = !!leadsKey && url.searchParams.get('k') === leadsKey;
   const crmRows = await sql`
     SELECT to_char(l.date_added AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM-DD') AS d,
-           l.ad_id, COALESCE(m.ad_name, l.ad_name) AS ad_name, l.campaign, l.source, l.quality, m.thumb
+           l.ad_id, COALESCE(m.ad_name, l.ad_name) AS ad_name, l.campaign, l.source, l.quality, m.thumb,
+           l.contact_name
     FROM crm_leads l
     LEFT JOIN (
       SELECT DISTINCT ON (ad_id) ad_id, ad_name, thumbnail_url AS thumb
@@ -470,6 +474,7 @@ export default async (req: Request, _context: Context) => {
     const fromAd = !!(r.ad_id || r.ad_name);
     const label = `${r.campaign ?? ''} ${r.ad_name ?? ''}`;
     return {
+      name: showNames ? (r.contact_name ?? null) : null,
       date: r.d, adId: r.ad_id ?? null, adName: r.ad_name ?? null, campaign: r.campaign ?? null,
       vertical: !fromAd ? null : /orbatix/i.test(label) ? 'Webinar Orbatix' : classifyVertical(label),
       quality: r.quality ?? 'unclassified',
@@ -494,6 +499,7 @@ export default async (req: Request, _context: Context) => {
   }
   const crmLeads = {
     updatedAt: crmUpd?.s ?? null,
+    showNames,
     total: crmLeadRows.length,
     fromAds: crmLeadRows.filter(r => r.origin === 'Meta').length,
     rows: crmLeadRows,

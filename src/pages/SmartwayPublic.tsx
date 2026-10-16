@@ -108,7 +108,10 @@ export default function SmartwayPublic() {
     setLoading(true);
     setError(null);
     // _t = cache-buster para que nunca devuelva una respuesta cacheada por el browser/CDN
-    fetch(`${BASE}/public-smartway?start=${range.start}&end=${range.end}&_t=${Date.now()}`, { cache: 'no-store', signal: ctrl.signal })
+    // k = clave del cliente: con ella el reporte muestra el nombre de cada lead.
+    const k = new URLSearchParams(window.location.search).get('k');
+    const kq = k ? `&k=${encodeURIComponent(k)}` : '';
+    fetch(`${BASE}/public-smartway?start=${range.start}&end=${range.end}${kq}&_t=${Date.now()}`, { cache: 'no-store', signal: ctrl.signal })
       .then(async r => {
         const json = await r.json();
         if (!r.ok || json.error) { setError(json.error ?? `HTTP ${r.status}`); return; }
@@ -316,7 +319,7 @@ export default function SmartwayPublic() {
         {/* ── De qué anuncio vino cada lead (CRM) ── */}
         {data.crmLeads && (
           <section>
-            <SectionTitle icon={<Target size={15} />} title="De qué anuncio vino cada lead" hint="según el CRM · sin datos personales" />
+            <SectionTitle icon={<Target size={15} />} title="De qué anuncio vino cada lead" hint={data.crmLeads.showNames ? 'según el CRM' : 'según el CRM · sin datos personales'} />
             <CrmLeadsTable data={data.crmLeads} vertColor={vertColor} />
           </section>
         )}

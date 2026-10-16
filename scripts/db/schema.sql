@@ -386,6 +386,10 @@ CREATE TABLE IF NOT EXISTS crm_leads (
   synced_at    TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (client_id, contact_id)
 );
+-- Nombre y empresa del lead: el reporte público SOLO los muestra si el link trae la
+-- clave del cliente (ver public-smartway.ts). Teléfono y email no se guardan acá.
+ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS contact_name TEXT;
+ALTER TABLE crm_leads ADD COLUMN IF NOT EXISTS company      TEXT;
 CREATE INDEX IF NOT EXISTS idx_crm_leads_ad   ON crm_leads (client_id, ad_id);
 CREATE INDEX IF NOT EXISTS idx_crm_leads_qual ON crm_leads (client_id, quality);
 
