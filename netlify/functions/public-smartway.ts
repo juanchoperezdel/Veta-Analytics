@@ -45,7 +45,7 @@ const SHOW_NOTES = {
 
 function originLabel(source: string | null): string {
   const s = (source || '').toLowerCase();
-  if (/asesor|aseor|derivad|referid/.test(s)) return 'Derivación';
+  if (/asesor|aseor|derivad|referid/.test(s)) return 'derivación';
   if (/instagram/.test(s)) return 'Instagram';
   if (/facebook/.test(s)) return 'Facebook';
   if (/whats|wsp/.test(s)) return 'WhatsApp';

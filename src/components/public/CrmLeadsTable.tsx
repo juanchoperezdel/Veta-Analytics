@@ -91,7 +91,7 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
                 return (
                   <tr key={i} className="border-t border-slate-100">
                     <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 tabular-nums capitalize">{fmtDay(r.date)}</td>
-                    {data.showNames && <td className="px-3 py-2.5 font-bold whitespace-nowrap">{r.name ?? <span className="text-slate-300">—</span>}</td>}
+                    {data.showNames && <td className="px-3 py-2.5 font-bold whitespace-nowrap capitalize">{r.name ?? <span className="text-slate-300">—</span>}</td>}
                     <td className="px-3 py-2.5">
                       {r.adName ? (
                         <span className="flex items-center gap-2.5 min-w-0">
