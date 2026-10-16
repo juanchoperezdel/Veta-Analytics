@@ -39,7 +39,7 @@ const SHOW_NOTES = {
   resultado: true,   // leads del periodo y su costo
   rubros:    true,   // que rubro rinde mejor / cual sigue en ajuste
   caminos:   true,   // formulario vs sitio
-  webinar:   true,   // registros de Orbatix
+  webinar:   false,  // registros de Orbatix: el webinar terminó (oct-2026), el equipo pidió sacarlo
   cobertura: true,   // aviso si una seccion no cubre todo el periodo
 };
 

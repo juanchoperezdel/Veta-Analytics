@@ -72,6 +72,9 @@ const PLACEMENT_ES: Record<string, string> = { instagram: 'Instagram', facebook:
 // Paleta de Smartway: negro + rojo de marca. El verde es de Veta (la agencia), no del
 // cliente — en su reporte manda su marca.
 const SW_RED = '#EA2A20';
+// El webinar Orbatix terminó (oct-2026): el equipo pidió sacar su sección. Sus campañas
+// siguen fuera del promedio comercial; poner en true para volver a mostrarla.
+const SHOW_WEBINAR = false;
 const CHART_COLOR = '#EA2A20';
 // Un color por rubro. Sin diccionario fijo: los rubros los define el naming de la
 // cuenta y cambian con cada tanda, así que se asignan por orden y con fallback.
@@ -152,7 +155,7 @@ export default function SmartwayPublic() {
     campaignTypes.length > 0 && { id: 'campanas', label: 'Campaña por campaña' },
     data.crmLeads && { id: 'leads', label: 'De qué anuncio vino cada lead', highlight: true },
     traffic && traffic.spend > 0 && { id: 'trafico', label: 'Tráfico y alcance' },
-    webinar && { id: 'webinar', label: webinar.label },
+    SHOW_WEBINAR && webinar && { id: 'webinar', label: webinar.label },
     google.hasData && { id: 'google', label: 'Google Ads' },
     Object.keys(demographics).some(k => (demographics[k] ?? []).length > 0) && { id: 'audiencia', label: 'A quién le llegó la pauta' },
   ].filter(Boolean) as NavItem[];
@@ -196,7 +199,7 @@ export default function SmartwayPublic() {
         <section id="resumen" className="scroll-mt-24">
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <Kpi label="Inversión total" value={formatCurrency(totals.spendTotal)} sub="Meta + Google, todo lo que se facturó" highlight />
-            <Kpi label="Leads comerciales" value={formatNumber(totals.leads)} sub="sin el webinar Orbatix" highlight />
+            <Kpi label="Leads comerciales" value={formatNumber(totals.leads)} sub="de la pauta comercial" highlight />
             <Kpi label="Costo por lead" value={totals.cplTotal > 0 ? formatCurrency(totals.cplTotal) : '—'} sub="sobre la inversión total" />
             <Kpi label="Inversión en Meta" value={formatCurrency(totals.spendMeta)} />
             <Kpi label="Inversión en Google" value={formatCurrency(totals.spendGoogle)} />
@@ -225,7 +228,7 @@ export default function SmartwayPublic() {
           <SectionTitle
             icon={<Target size={15} />}
             title="Embudo comercial"
-            hint="Meta · solo lo que busca leads (sin tráfico ni webinar)"
+            hint="Meta · solo lo que busca leads (sin tráfico)"
           />
           <Card className="p-5">
             <FunnelView f={overall} />
@@ -376,7 +379,7 @@ export default function SmartwayPublic() {
         )}
 
         {/* ── Webinar Orbatix ── */}
-        {webinar && (
+        {SHOW_WEBINAR && webinar && (
           <section id="webinar" className="scroll-mt-24">
             <SectionTitle icon={<Flag size={15} className="text-violet-600" />} title={webinar.label} hint="registros a un evento · medido aparte del lead-gen" />
             <Card className="p-5 border-violet-200 bg-violet-50/30">
