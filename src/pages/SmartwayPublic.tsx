@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/Card';
 import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
 import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
 import { CrmLeadsTable, type CrmLeads } from '@/components/public/CrmLeadsTable';
+import { SectionNav, useScrollToHash, type NavItem } from '@/components/public/SectionNav';
 
 // Ruta relativa: bajo `netlify dev` (cualquier puerto) y en producción es same-origin.
 const BASE = '/.netlify/functions';
@@ -122,6 +123,9 @@ export default function SmartwayPublic() {
     return () => ctrl.abort();
   }, [range.start, range.end]);
 
+  // Abre la sección del link (#leads, #rubros…) cuando el reporte terminó de cargar.
+  useScrollToHash(!!data && !loading);
+
   if (loading && !data) return <Status icon={<Loader2 className="animate-spin" />} title="Cargando el reporte de Smartway…" />;
   if (error || !data) return <Status icon={<AlertTriangle />} title="No pudimos cargar el reporte" subtitle={error ?? ''} isError />;
 
@@ -136,11 +140,27 @@ export default function SmartwayPublic() {
   const noData = overall.spend === 0 && (!traffic || traffic.spend === 0) && !google.hasData;
   const vertColor = (name: string) => VERT_PALETTE[verticals.findIndex(v => v.name === name)] ?? '#64748b';
   const activeChannels = ([channels.form, channels.landing, channels.remarketing] as Block[]).filter(c => c.spend > 0);
+  // Menú de secciones: mismas condiciones con que se muestra cada sección más abajo.
+  const navItems: NavItem[] = [
+    { id: 'resumen', label: 'Resumen' },
+    notes.length > 0 && { id: 'que-pasa', label: 'Qué está pasando' },
+    { id: 'embudo', label: 'Embudo comercial' },
+    activeChannels.length > 1 && { id: 'caminos', label: 'Los caminos hacia el lead' },
+    verticals.length > 0 && { id: 'rubros', label: 'Por rubro' },
+    daily.length > 1 && { id: 'evolucion', label: 'Cómo viene evolucionando' },
+    (ads.best.length > 0 || ads.worst.length > 0) && { id: 'anuncios', label: 'Los mejores anuncios' },
+    campaignTypes.length > 0 && { id: 'campanas', label: 'Campaña por campaña' },
+    data.crmLeads && { id: 'leads', label: 'De qué anuncio vino cada lead', highlight: true },
+    traffic && traffic.spend > 0 && { id: 'trafico', label: 'Tráfico y alcance' },
+    webinar && { id: 'webinar', label: webinar.label },
+    google.hasData && { id: 'google', label: 'Google Ads' },
+    Object.keys(demographics).some(k => (demographics[k] ?? []).length > 0) && { id: 'audiencia', label: 'A quién le llegó la pauta' },
+  ].filter(Boolean) as NavItem[];
 
   return (
     <div className="min-h-screen bg-[#f6f7f9] text-slate-900">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/80 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between gap-4">
+        <div className="mx-auto max-w-7xl px-5 py-4 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Wordmark name={config.name} />
             <div>
@@ -158,7 +178,9 @@ export default function SmartwayPublic() {
         {loading && <div className="h-0.5 animate-pulse" style={{ background: SW_RED }} />}
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 py-6 space-y-9">
+      <div className="mx-auto max-w-7xl px-5 pt-4 lg:pt-0 lg:flex lg:gap-8">
+      {!noData && <SectionNav items={navItems} accent={SW_RED} />}
+      <main className="flex-1 min-w-0 py-6 space-y-9">
         {noData ? (
           <Card className="p-8 text-center">
             <Info className="mx-auto mb-2 text-slate-300" />
@@ -171,7 +193,7 @@ export default function SmartwayPublic() {
         ) : (
         <>
         {/* ── KPIs hero ── */}
-        <section>
+        <section id="resumen" className="scroll-mt-24">
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <Kpi label="Inversión total" value={formatCurrency(totals.spendTotal)} sub="Meta + Google, todo lo que se facturó" highlight />
             <Kpi label="Leads comerciales" value={formatNumber(totals.leads)} sub="sin el webinar Orbatix" highlight />
@@ -190,7 +212,7 @@ export default function SmartwayPublic() {
 
         {/* ── Lectura del período ── */}
         {notes.length > 0 && (
-          <section>
+          <section id="que-pasa" className="scroll-mt-24">
             <SectionTitle icon={<ClipboardList size={15} />} title="Qué está pasando" hint="lectura de los números de este período" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {notes.map((n, i) => <Fragment key={i}><NoteCard note={n} /></Fragment>)}
@@ -199,7 +221,7 @@ export default function SmartwayPublic() {
         )}
 
         {/* ── Embudo comercial ── */}
-        <section>
+        <section id="embudo" className="scroll-mt-24">
           <SectionTitle
             icon={<Target size={15} />}
             title="Embudo comercial"
@@ -218,7 +240,7 @@ export default function SmartwayPublic() {
 
         {/* ── Los caminos hacia el lead ── */}
         {activeChannels.length > 1 && (
-          <section>
+          <section id="caminos" className="scroll-mt-24">
             <SectionTitle icon={<Split size={15} />} title="Los caminos hacia el lead" hint="cada uno se mide con su propia vara" />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
               {activeChannels.map(c => <Fragment key={c.kind}><ChannelCard c={c} /></Fragment>)}
@@ -228,7 +250,7 @@ export default function SmartwayPublic() {
 
         {/* ── Por rubro ── */}
         {verticals.length > 0 && (
-          <section>
+          <section id="rubros" className="scroll-mt-24">
             <SectionTitle icon={<Flag size={15} />} title="Por rubro" hint="el rubro sale del nombre de la campaña" />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
               {verticals.map(v => <Fragment key={v.name}><VerticalCard v={v} color={vertColor(v.name)} /></Fragment>)}
@@ -238,7 +260,7 @@ export default function SmartwayPublic() {
 
         {/* ── Evolución diaria ── */}
         {daily.length > 1 && (
-          <section>
+          <section id="evolucion" className="scroll-mt-24">
             <SectionTitle icon={<LineChartIcon size={15} />} title="Cómo viene evolucionando" hint="día a día · lead-gen comercial" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <DailyChart data={daily} metric="spend" title="Inversión por día" isCurrency />
@@ -249,7 +271,7 @@ export default function SmartwayPublic() {
 
         {/* ── Mejores / a revisar ── */}
         {(ads.best.length > 0 || ads.worst.length > 0) && (
-          <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+          <section id="anuncios" className="scroll-mt-24 grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             {ads.best.length > 0 && (
               <div>
                 <SectionTitle
@@ -279,7 +301,7 @@ export default function SmartwayPublic() {
 
         {/* ── Campañas ── */}
         {campaignTypes.length > 0 && (
-          <section>
+          <section id="campanas" className="scroll-mt-24">
             <SectionTitle icon={<Users size={15} />} title="Campaña por campaña" hint="lead-gen comercial · ordenado por inversión" />
             <Card className="p-0 overflow-hidden">
               <div className="overflow-x-auto">
@@ -318,7 +340,7 @@ export default function SmartwayPublic() {
 
         {/* ── De qué anuncio vino cada lead (CRM) ── */}
         {data.crmLeads && (
-          <section>
+          <section id="leads" className="scroll-mt-24">
             <SectionTitle icon={<Target size={15} />} title="De qué anuncio vino cada lead" hint={data.crmLeads.showNames ? 'según el CRM' : 'según el CRM · sin datos personales'} />
             <CrmLeadsTable data={data.crmLeads} vertColor={vertColor} />
           </section>
@@ -326,7 +348,7 @@ export default function SmartwayPublic() {
 
         {/* ── Tráfico y alcance (fuera del promedio comercial) ── */}
         {traffic && traffic.spend > 0 && (
-          <section>
+          <section id="trafico" className="scroll-mt-24">
             <SectionTitle icon={<Megaphone size={15} className="text-sky-600" />} title="Tráfico y alcance" hint="no busca leads · medido aparte" />
             <Card className="p-5 border-sky-200 bg-sky-50/30">
               <div className="flex flex-wrap items-end gap-x-8 gap-y-3 mb-3">
@@ -355,7 +377,7 @@ export default function SmartwayPublic() {
 
         {/* ── Webinar Orbatix ── */}
         {webinar && (
-          <section>
+          <section id="webinar" className="scroll-mt-24">
             <SectionTitle icon={<Flag size={15} className="text-violet-600" />} title={webinar.label} hint="registros a un evento · medido aparte del lead-gen" />
             <Card className="p-5 border-violet-200 bg-violet-50/30">
               <div className="flex flex-wrap items-end gap-x-8 gap-y-3 mb-3">
@@ -374,7 +396,7 @@ export default function SmartwayPublic() {
 
         {/* ── Google ── */}
         {google.hasData && (
-          <section>
+          <section id="google" className="scroll-mt-24">
             <SectionTitle icon={<Eye size={15} />} title="Google Ads" hint={google.isPmax ? 'incluye Performance Max' : undefined} />
             <Card className="p-5">
               <div className="flex flex-wrap items-end gap-x-8 gap-y-3 mb-4">
@@ -429,7 +451,7 @@ export default function SmartwayPublic() {
 
         {/* ── Demografía ── */}
         {Object.keys(demographics).some(k => (demographics[k] ?? []).length > 0) && (
-          <section>
+          <section id="audiencia" className="scroll-mt-24">
             <SectionTitle icon={<Users size={15} />} title="A quién le llegó la pauta" hint="cuánto se invirtió y CTR por segmento — no implica calidad del lead" />
             {totals.leadsAllMeta > totals.leads && (
               <p className="text-[11px] text-slate-500 bg-slate-100/70 border border-slate-200 rounded-lg px-3 py-2 mb-3 leading-relaxed">
@@ -461,6 +483,7 @@ export default function SmartwayPublic() {
           Datos directos de Meta Ads y Google Ads · Actualización automática cada 6 horas · Veta Analytics
         </footer>
       </main>
+      </div>
     </div>
   );
 }
