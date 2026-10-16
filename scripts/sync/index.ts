@@ -55,7 +55,7 @@ async function metaFetch(url: string, tries = 4): Promise<any> {
     let body: any = null;
     try { body = JSON.parse(text); } catch { /* respuesta no-JSON */ }
     const code = body?.error?.code;
-    const retriable = res.status === 429 || res.status >= 500 || code === 4 || code === 17 || code === 613;
+    const retriable = res.status === 429 || res.status >= 500 || code === 2 || code === 4 || code === 17 || code === 613;  // 2 = "Service temporarily unavailable"
     if (res.ok && body && !body.error) {
       const usage = res.headers.get('x-business-use-case-usage');
       if (usage && /"call_count":\s*(8[5-9]|9\d|100)/.test(usage)) console.warn(`  ⚠ Meta cuota alta: ${usage.slice(0, 200)}`);
@@ -435,15 +435,23 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
     'actions', 'action_values', 'ctr',
   ].join(',');
 
-  const url = `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/insights?` +
-    `level=ad&time_increment=1` +
-    `&time_range=${encodeURIComponent(JSON.stringify({ since, until }))}` +
-    `&filtering=${encodeURIComponent(JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]))}` +
-    `&fields=${fields}&access_token=${accessToken}&limit=500`;
-
-  // PAGINAR: con 30 días × decenas de ads se superan las 500 filas de una página.
-  // Sin paginar se truncaban los días recientes (ej: registros del webinar de hoy).
-  const data: any[] = await metaFetchAll(url);
+  // EN TRAMOS DE 7 DÍAS: el pedido de 30 días × todos los anuncios en una sola consulta
+  // hacía que Meta respondiera "Service temporarily unavailable" (code 2 / 1504044) en
+  // las cuentas con muchos anuncios (Smartway y Griba, oct-2026), y el reporte dejaba de
+  // actualizar leads por día. Mismo resultado, consultas 4 veces más livianas.
+  // PAGINAR igual dentro de cada tramo (sin paginar se truncaban los días recientes).
+  const data: any[] = [];
+  const endD = new Date(until);
+  for (let s = new Date(since); s <= endD; s.setDate(s.getDate() + 7)) {
+    const e = new Date(s); e.setDate(e.getDate() + 6);
+    const range = { since: s.toISOString().split('T')[0], until: (e > endD ? endD : e).toISOString().split('T')[0] };
+    const url = `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/insights?` +
+      `level=ad&time_increment=1` +
+      `&time_range=${encodeURIComponent(JSON.stringify(range))}` +
+      `&filtering=${encodeURIComponent(JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]))}` +
+      `&fields=${fields}&access_token=${accessToken}&limit=200`;
+    data.push(...await metaFetchAll(url));
+  }
 
   // Pedimos creative info (thumbnail_url + effective_status) — solo para los top ads por spend
   // y con sleep de 1.5s entre batches para no pegar rate limit.

@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 
 // De qué anuncio vino cada lead. Los datos salen del CRM del cliente (GoHighLevel), que
 // guarda la atribución al anuncio de Meta en cada contacto. La página es pública: acá no
-// se muestra nombre, teléfono ni email del lead, solo día, anuncio, campaña y estado.
+// se muestra teléfono ni email del lead: día, nombre, anuncio y campaña.
 
 export type CrmLeadRow = {
   name: string | null; date: string; adId: string | null; adName: string | null; campaign: string | null;
@@ -61,7 +61,7 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
           {allMetaInCrm
             ? <>Los <b className="text-slate-900 tabular-nums">{data.metaLeads}</b> leads que trajo la pauta están en el CRM, cada uno con su anuncio</>
             : <><b className="text-slate-900 tabular-nums">{data.total}</b> leads en el CRM · <b className="text-slate-900 tabular-nums">{data.fromAds}</b> con su anuncio</>}
-          {other > 0 && <> · <span className="tabular-nums">+{other}</span> por otros canales</>}
+          {other > 0 && <> · <span className="tabular-nums">+{other}</span> con el anuncio sin atribuir</>}
         </p>
         <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-[12px] font-bold">
           {([['leads', 'Lead por lead'], ['ads', 'Por anuncio']] as const).map(([k, l]) => (
@@ -81,13 +81,11 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
                 <th className="text-left font-bold px-4 py-2.5">Día</th>
                 {data.showNames && <th className="text-left font-bold px-3 py-2.5">Lead</th>}
                 <th className="text-left font-bold px-3 py-2.5">Anuncio</th>
-                <th className="text-left font-bold px-3 py-2.5 hidden md:table-cell">Campaña</th>
-                <th className="text-right font-bold px-4 py-2.5">Estado</th>
+                <th className="text-left font-bold px-4 py-2.5 hidden md:table-cell">Campaña</th>
               </tr>
             </thead>
             <tbody>
               {data.rows.slice(0, shown).map((r, i) => {
-                const q = QUALITY[r.quality] ?? QUALITY.unclassified;
                 return (
                   <tr key={i} className="border-t border-slate-100">
                     <td className="px-4 py-2.5 whitespace-nowrap text-slate-500 tabular-nums capitalize">{fmtDay(r.date)}</td>
@@ -105,12 +103,9 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
                             )}
                           </span>
                         </span>
-                      ) : <span className="text-slate-500">Llegó por {r.origin}</span>}
+                      ) : <span className="text-slate-400 italic">Anuncio no atribuido</span>}
                     </td>
-                    <td className="px-3 py-2.5 text-slate-500 hidden md:table-cell truncate max-w-[220px]">{r.campaign ?? '—'}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <span className={cn('inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 whitespace-nowrap', q.cls)}>{q.label}</span>
-                    </td>
+                    <td className="px-4 py-2.5 text-slate-500 hidden md:table-cell truncate max-w-[220px]">{r.campaign ?? '—'}</td>
                   </tr>
                 );
               })}
@@ -156,7 +151,7 @@ export function CrmLeadsTable({ data, vertColor }: { data: CrmLeads; vertColor: 
         </button>
       )}
       <p className="border-t border-slate-100 px-4 py-2.5 text-[11px] text-slate-400">
-        Fuente: CRM (GoHighLevel){updated && <> · actualizado {updated}</>}. El estado lo carga el equipo comercial en el CRM a medida que contacta a cada lead.
+        Fuente: CRM (GoHighLevel){updated && <> · actualizado {updated}</>}. Cuando el CRM no recibe el dato del anuncio, el lead figura como "anuncio no atribuido".
       </p>
     </Card>
   );
