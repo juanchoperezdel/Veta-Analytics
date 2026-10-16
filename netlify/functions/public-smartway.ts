@@ -450,6 +450,58 @@ export default async (req: Request, _context: Context) => {
   const [gUpd] = await sql`SELECT MAX(synced_at) s FROM google_ads_campaigns WHERE client_id = ${cid}`;
   const [firstDay] = await sql`SELECT MIN(snapshot_date)::text d FROM meta_ads_creatives WHERE client_id = ${cid}`;
 
+  // ─── De qué anuncio vino cada lead (CRM GoHighLevel) ─────────────────────────
+  // GHL guarda la atribución al anuncio de Meta (utmAdId/utmContent) en cada contacto;
+  // el sync la baja a crm_leads. La página es pública: NO se expone nombre, teléfono ni
+  // email, solo día, anuncio, campaña y estado.
+  const crmRows = await sql`
+    SELECT to_char(l.date_added AT TIME ZONE 'America/Argentina/Buenos_Aires', 'YYYY-MM-DD') AS d,
+           l.ad_id, COALESCE(m.ad_name, l.ad_name) AS ad_name, l.campaign, l.source, l.quality, m.thumb
+    FROM crm_leads l
+    LEFT JOIN (
+      SELECT DISTINCT ON (ad_id) ad_id, ad_name, thumbnail_url AS thumb
+      FROM meta_ads_creatives WHERE client_id = ${cid} ORDER BY ad_id, snapshot_date DESC
+    ) m ON m.ad_id = l.ad_id
+    WHERE l.client_id = ${cid}
+      AND (l.date_added AT TIME ZONE 'America/Argentina/Buenos_Aires')::date BETWEEN ${start}::date AND ${end}::date
+    ORDER BY l.date_added DESC`;
+  const [crmUpd] = await sql`SELECT MAX(synced_at) s FROM crm_leads WHERE client_id = ${cid}`;
+  const crmLeadRows = crmRows.map((r: any) => {
+    const fromAd = !!(r.ad_id || r.ad_name);
+    const label = `${r.campaign ?? ''} ${r.ad_name ?? ''}`;
+    return {
+      date: r.d, adId: r.ad_id ?? null, adName: r.ad_name ?? null, campaign: r.campaign ?? null,
+      vertical: !fromAd ? null : /orbatix/i.test(label) ? 'Webinar Orbatix' : classifyVertical(label),
+      quality: r.quality ?? 'unclassified',
+      origin: fromAd ? 'Meta' : (r.source || 'Otro origen'),
+      thumbnail: r.thumb ?? null,
+    };
+  });
+  const byAdMap = new Map<string, any>();
+  for (const r of crmLeadRows) {
+    if (!r.adName && !r.adId) continue;
+    // Se agrupa por NOMBRE: el mismo anuncio duplicado en varias campañas tiene un ad_id
+    // distinto en cada una, pero para el cliente es una sola pieza.
+    const k = r.adName || r.adId;
+    const e = byAdMap.get(k) || { adId: r.adId, adName: r.adName, campaigns: new Set<string>(), vertical: r.vertical, thumbnail: r.thumbnail, leads: 0, qualified: 0, meeting: 0, lastDate: r.date };
+    if (r.campaign) e.campaigns.add(r.campaign);
+    if (!e.thumbnail && r.thumbnail) e.thumbnail = r.thumbnail;
+    e.leads++;
+    if (r.quality === 'qualified') e.qualified++;
+    if (r.quality === 'meeting') e.meeting++;
+    if (r.date > e.lastDate) e.lastDate = r.date;
+    byAdMap.set(k, e);
+  }
+  const crmLeads = {
+    updatedAt: crmUpd?.s ?? null,
+    total: crmLeadRows.length,
+    fromAds: crmLeadRows.filter(r => r.origin === 'Meta').length,
+    rows: crmLeadRows,
+    byAd: [...byAdMap.values()].map(({ campaigns, ...a }) => ({
+      ...a, campaign: campaigns.size > 1 ? `En ${campaigns.size} campañas` : ([...campaigns][0] ?? null),
+    })).sort((a, b) => b.leads - a.leads || b.lastDate.localeCompare(a.lastDate)),
+  };
+
   const body = {
     config: {
       name: client.name, currency: 'ARS', period: { start, end },
@@ -475,9 +527,8 @@ export default async (req: Request, _context: Context) => {
     verticals, campaignTypes, daily, notes,
     ads: { best, worst, bestBy, spendFloor: SPEND_FLOOR },
     google, demographics, demoCoverage,
-    // Leads calificados y reuniones viven en el CRM del cliente (HubSpot), todavía sin
-    // conectar. La estructura está lista: es el mismo cruce por ad_id que ya corre en Griba.
     leadQuality: null,
+    crmLeads,
   };
 
   return new Response(JSON.stringify(body), { headers });

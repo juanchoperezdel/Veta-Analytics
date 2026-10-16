@@ -40,3 +40,4 @@ jobs:
           GA4_SERVICE_ACCOUNT_JSON:   ${{ secrets.GA4_SERVICE_ACCOUNT_JSON }}
           # CRM GoHighLevel — calidad de leads (por cliente: GHL_TOKEN_<SLUG>)
           GHL_TOKEN_GRIBA:            ${{ secrets.GHL_TOKEN_GRIBA }}
+          GHL_TOKEN_SMARTWAY:         ${{ secrets.GHL_TOKEN_SMARTWAY }}

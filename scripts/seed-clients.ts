@@ -27,6 +27,7 @@ const CLIENTS = [
     meta_ad_account_id: '2063808167634',
     google_ads_customer_id: '7483493147',
     ga4_property_id: null, // Smartway no tiene GA4 conectado → el sync saltea GA4
+    ghl_location_id: '9JVWXMswcFONv8g4OBW0', // CRM GoHighLevel; falta GHL_TOKEN_SMARTWAY (sin token el sync lo saltea)
     active: true,
   },
   {

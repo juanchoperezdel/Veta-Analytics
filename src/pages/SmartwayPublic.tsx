@@ -8,6 +8,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Card } from '@/components/ui/Card';
 import { DateRangePicker, type DateRange } from '@/components/ui/DateRangePicker';
 import { formatCurrency, formatNumber, formatPercent, cn } from '@/lib/utils';
+import { CrmLeadsTable, type CrmLeads } from '@/components/public/CrmLeadsTable';
 
 // Ruta relativa: bajo `netlify dev` (cualquier puerto) y en producción es same-origin.
 const BASE = '/.netlify/functions';
@@ -59,6 +60,7 @@ type Data = {
   demographics: Record<string, Demo[]>;
   demoCoverage: Record<string, { lastDay: string | null; coverage: number }>;
   leadQuality: null;
+  crmLeads?: CrmLeads;
 };
 
 const DEMO_LABELS: Record<string, string> = { age: 'Edad', gender: 'Género', region: 'Provincia', publisher_platform: 'Dónde se mostró' };
@@ -308,6 +310,14 @@ export default function SmartwayPublic() {
                 </table>
               </div>
             </Card>
+          </section>
+        )}
+
+        {/* ── De qué anuncio vino cada lead (CRM) ── */}
+        {data.crmLeads && (
+          <section>
+            <SectionTitle icon={<Target size={15} />} title="De qué anuncio vino cada lead" hint="según el CRM · sin datos personales" />
+            <CrmLeadsTable data={data.crmLeads} vertColor={vertColor} />
           </section>
         )}
 
