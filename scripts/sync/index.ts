@@ -85,6 +85,16 @@ async function metaFetchAll(url: string): Promise<any[]> {
   return out;
 }
 
+// Une dos arrays de `actions` (o `action_values`) sumando por action_type, para que no
+// queden dos entradas del mismo tipo cuando se fusionan filas del mismo anuncio y día.
+function mergeActions(a: any[] = [], b: any[] = []): any[] {
+  const m = new Map<string, number>();
+  for (const x of [...(a ?? []), ...(b ?? [])]) {
+    m.set(x.action_type, (m.get(x.action_type) ?? 0) + Number(x.value ?? 0));
+  }
+  return [...m.entries()].map(([action_type, value]) => ({ action_type, value: String(value) }));
+}
+
 function extractMetaConversions(actions: any[]): number {
   if (!actions?.length) return 0;
   for (const t of META_CONV_PRIORITY) {
@@ -445,12 +455,47 @@ async function syncMetaCreatives(clientId: string, adAccountId: string, accessTo
   for (let s = new Date(since); s <= endD; s.setDate(s.getDate() + 7)) {
     const e = new Date(s); e.setDate(e.getDate() + 6);
     const range = { since: s.toISOString().split('T')[0], until: (e > endD ? endD : e).toISOString().split('T')[0] };
-    const url = `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/insights?` +
-      `level=ad&time_increment=1` +
-      `&time_range=${encodeURIComponent(JSON.stringify(range))}` +
-      `&filtering=${encodeURIComponent(JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]))}` +
-      `&fields=${fields}&access_token=${accessToken}&limit=200`;
-    data.push(...await metaFetchAll(url));
+    // SIN `filtering` de spend: en algunas cuentas Meta devuelve las mismas filas pero con
+    // `actions` VACÍO cuando se le pasa ese filtro. Medido el 21-10-2026 en el mismo rango:
+    // ControlPet con filtro = 112 filas / 0 actions / 0 leads; sin filtro = 112 filas / 51 con
+    // actions / 19 leads. Griba daba 145 filas y 3 leads en los dos casos. O sea: el filtro no
+    // sacaba ni una fila y en ControlPet borraba leads, link_clicks y landing_page_view —
+    // "Contactos por día: 0 en total" con la pauta gastando $20.000 por día.
+    // Las filas sin gasto se descartan abajo, en código, que es gratis y no toca la respuesta.
+    const base = `https://graph.facebook.com/${GRAPH}/act_${adAccountId}/insights?` +
+      `level=ad&time_increment=1&time_range=${encodeURIComponent(JSON.stringify(range))}`;
+
+    // (A) CON el filtro de spend: es la que trae el gasto, las impresiones y los clicks bien.
+    const conGasto = await metaFetchAll(
+      `${base}&filtering=${encodeURIComponent(JSON.stringify([{ field: 'spend', operator: 'GREATER_THAN', value: 0 }]))}` +
+      `&fields=${fields}&access_token=${accessToken}&limit=200`);
+
+    // (B) SIN el filtro, pidiendo solo lo mínimo: es la única que trae las conversiones.
+    // Medido el 21-10-2026 en ControlPet, mismo rango de 3 días: (A) daba 29 filas, $42.784 de
+    // gasto y 0 leads; (B) daba otras 29 filas, $2.439 y 7 leads. La API de Meta nunca devuelve
+    // el gasto y las conversiones en la misma respuesta para esa cuenta, así que hay que pedir
+    // las dos y cruzarlas. En Smartway y Griba (A) ya trae las conversiones, y el cruce no
+    // cambia nada: los action_type se consolidan por tipo sin duplicar.
+    const conActions = await metaFetchAll(
+      `${base}&fields=ad_id,ad_name,campaign_id,campaign_name,date_start,actions,action_values` +
+      `&access_token=${accessToken}&limit=200`);
+
+    const idx = new Map<string, any>();
+    for (const r of conGasto) idx.set(`${r.ad_id}|${r.date_start}`, { ...r });
+    for (const r of conActions) {
+      if (!(r.actions ?? []).length) continue;
+      const k = `${r.ad_id}|${r.date_start}`;
+      const prev = idx.get(k);
+      if (prev) {
+        prev.actions       = mergeActions(prev.actions, r.actions);
+        prev.action_values = mergeActions(prev.action_values, r.action_values);
+      } else {
+        // Conversión atribuida a un anuncio que ese día no registró gasto: entra igual,
+        // con los numéricos en cero, para no perder el lead.
+        idx.set(k, { ...r, spend: '0', impressions: '0', clicks: '0', inline_link_clicks: '0', reach: '0', ctr: '0' });
+      }
+    }
+    data.push(...idx.values());
   }
 
   // Pedimos creative info (thumbnail_url + effective_status) — solo para los top ads por spend
@@ -962,11 +1007,27 @@ async function main() {
   // Multi-cliente: cada fila trae sus IDs de cuenta. Las credenciales (token Meta,
   // service-account Google) siguen siendo globales (env). Si un ID está NULL en la DB,
   // se hace fallback a la env var global (mantiene a Andesmar funcionando como antes).
-  const clients = await sql`
-    SELECT id, slug, meta_ad_account_id, google_ads_customer_id, ga4_property_id, ghl_location_id
-    FROM clients
-    WHERE active = true
-  `;
+  // Un slug como argumento corre SOLO ese cliente: `npx tsx scripts/sync/index.ts controlpet`.
+  // Sirve para verificar un fix sin esperar los ~20 min de la corrida completa. Sin argumento,
+  // se comporta igual que siempre (todos los activos), que es como lo llama el cron.
+  const only = process.argv[2]?.trim().toLowerCase();
+  const clients = only
+    ? await sql`
+        SELECT id, slug, meta_ad_account_id, google_ads_customer_id, ga4_property_id, ghl_location_id
+        FROM clients
+        WHERE active = true AND slug = ${only}
+      `
+    : await sql`
+        SELECT id, slug, meta_ad_account_id, google_ads_customer_id, ga4_property_id, ghl_location_id
+        FROM clients
+        WHERE active = true
+      `;
+  if (only && clients.length === 0) {
+    console.error(`No hay cliente activo con slug "${only}".`);
+    process.exitCode = 1;
+    return;
+  }
+  if (only) console.log(`Filtrado a un solo cliente: ${only}`);
 
   // Sin esto, cualquier fallo (token vencido, version de API removida, rate limit) se
   // tragaba en el catch y el run de GitHub Actions salia VERDE con data faltante. Paso:
