@@ -85,12 +85,16 @@ async function metaFetchAll(url: string): Promise<any[]> {
   return out;
 }
 
-// Une dos arrays de `actions` (o `action_values`) sumando por action_type, para que no
-// queden dos entradas del mismo tipo cuando se fusionan filas del mismo anuncio y día.
+// Une dos lecturas de LA MISMA métrica (mismo anuncio, mismo día) quedándose con el MAYOR
+// por action_type. Nunca suma: las dos consultas que se cruzan miden lo mismo, así que sumar
+// duplica. Pasó el 21-10-2026: ControlPet marcó 118 leads en octubre contra los 58 reales de
+// Meta, y Griba 26 contra 13, porque las dos consultas traían los mismos leads y se sumaban.
+// El cruce sigue sirviendo para otra cosa: la atribución de Meta llega con días de retraso y
+// a veces una de las dos lecturas todavía trae 0 — con `max` gana la que ya tiene el dato.
 function mergeActions(a: any[] = [], b: any[] = []): any[] {
   const m = new Map<string, number>();
   for (const x of [...(a ?? []), ...(b ?? [])]) {
-    m.set(x.action_type, (m.get(x.action_type) ?? 0) + Number(x.value ?? 0));
+    m.set(x.action_type, Math.max(m.get(x.action_type) ?? 0, Number(x.value ?? 0)));
   }
   return [...m.entries()].map(([action_type, value]) => ({ action_type, value: String(value) }));
 }
